@@ -513,7 +513,7 @@ function masquerCarte() { document.getElementById("carteInfo").classList.remove(
 /* ============ RECHERCHE WEB (Wikipédia, DuckDuckGo) ============ */
 function estQuestionWeb(t) {
   const s = t.toLowerCase().trim();
-  return /\?/.test(t) || /^(qui|que|quel|quelle|quels|quelles|comment|pourquoi|quand|où|combien|est-ce|c'est quoi|dis-moi|parle-moi de|raconte|cherche)/.test(s);
+  return /\?/.test(t) || /^(qui|que|quel|quelle|quels|quelles|comment|pourquoi|quand|où|combien|est-ce|c'est quoi|dis-moi|parle-moi de|raconte|cherche|trouve|explique|aide-moi|solution)/.test(s) || /c'est quoi|explique-moi|dis-moi|comment faire|comment on fait/.test(s);
 }
 function afficherSources(sources) {
   const z = document.getElementById("sources");
@@ -530,15 +530,16 @@ async function chercherWeb(texte) {
   try {
     const r = await fetch("https://api.duckduckgo.com/?q=" + q + "&format=json&no_html=1&skip_disambig=1");
     const d = await r.json();
-    if (d.AbstractText) { rep = d.AbstractText; sources.push([d.AbstractSource || "DuckDuckGo", d.AbstractURL || ("https://duckduckgo.com/?q=" + q)]); }
+    if (d.AbstractText) { rep = d.AbstractText; sources.push([d.AbstractSource || "DuckDuckGo", d.AbstractURL || ("https://duckduckgo.com/?q=" + q)]); if (d.Image) afficherImage("https://duckduckgo.com" + d.Image, "🖼️ " + texte, d.AbstractSource || ""); }
   } catch(e) {}
   if (!rep) {
     try {
-      const r2 = await fetch("https://fr.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&generator=search&gsrsearch=" + q + "&gsrlimit=3&format=json&origin=*");
+      const r2 = await fetch("https://fr.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro&explaintext&pithumbsize=800&generator=search&gsrsearch=" + q + "&gsrlimit=3&format=json&origin=*");
       const d2 = await r2.json();
       const pages = (d2.query && d2.query.pages) ? Object.values(d2.query.pages) : [];
       pages.sort((a,b) => (a.index||0) - (b.index||0));
       if (pages.length && pages[0].extract) {
+        if (pages[0].thumbnail && pages[0].thumbnail.source) afficherImage(pages[0].thumbnail.source, "🖼️ " + pages[0].title, "Wikipédia");
         rep = pages[0].extract.replace(/\s+/g, " ").slice(0, 520);
         const coupe = rep.lastIndexOf(". "); if (coupe > 200) rep = rep.slice(0, coupe + 1);
         for (const pg of pages) sources.push(["Wikipédia", "https://fr.wikipedia.org/wiki/" + encodeURIComponent(pg.title.replace(/ /g, "_"))]);
@@ -686,17 +687,32 @@ function reponse(t) {
   ]);
 }
 function repondreNom(nom) { return choixVar("nom", ["Enchantée, " + nom + " ! Boyei malamu, bienvenue. Je retiens ton prénom.", "Ravie de te connaître, " + nom + " ! Je retiens ton prénom, je ne l'oublierai pas.", "Ah, " + nom + " ! Beau prénom. C'est noté dans ma mémoire."]); }
-const _derniersChoix = {};
+const _derniersChoix = JSON.parse(sessionStorage.getItem("mayela_choix") || "{}");
 function choixVar(cle, arr) {
   if (!arr.length) return "";
   let i = Math.floor(Math.random() * arr.length);
   if (arr.length > 1) { let garde = 0; while (_derniersChoix[cle] === i && garde++ < 6) i = Math.floor(Math.random() * arr.length); }
   _derniersChoix[cle] = i;
+  try { sessionStorage.setItem("mayela_choix", JSON.stringify(_derniersChoix)); } catch(e) {}
   return arr[i];
 }
 function questionApres(cle, pool) { return Math.random() < 0.65 ? " " + choixVar(cle, pool) : ""; }
 function choix(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
 
+
+/* ============ IMAGE AUTOMATIQUE POUR LES SUJETS CONGO ============ */
+const IMAGES_SUJETS = [["brazzaville", "Brazzaville Congo"], ["pointe-noire", "Pointe-Noire Congo"], ["pointe noire", "Pointe-Noire Congo"], ["odzala", "Odzala-Kokoua national park"], ["nouabal", "Nouabale-Ndoki"], ["gorille", "gorilla Congo forest"], ["fleuve", "Congo river"], ["basilique", "Basilique Sainte-Anne Brazzaville"], ["sape", "sapeur Brazzaville mode"], ["rumba", "rumba congolaise musique"], ["diosso", "Gorges de Diosso Congo"], ["kinshasa", "Kinshasa"]];
+async function imagePourSujet(texte) {
+  const s = texte.toLowerCase();
+  const trouve = IMAGES_SUJETS.find(([mot]) => s.includes(mot));
+  if (!trouve) return;
+  try {
+    const r = await fetch("https://api.openverse.org/v1/images/?q=" + encodeURIComponent(trouve[1]) + "&page_size=3");
+    const d = await r.json();
+    const res = (d.results || []).filter(x => x.url);
+    if (res.length) afficherImage(res[0].url, "🖼️ " + trouve[1], nettoyerHtml(res[0].title || ""));
+  } catch(e) {}
+}
 
 /* ============ INFOS DU JOUR (presse : ADIAC Congo, RFI, France 24) ============ */
 function nettoyerHtml(h) { const d = document.createElement("div"); d.innerHTML = h || ""; return (d.textContent || "").replace(/\s+/g, " ").trim(); }
@@ -824,6 +840,7 @@ function repondre(texte) {
   const rep = reponse(texte);
   const repliLocal = window._repli; window._repli = false;
   majCarteInfo(texte);
+  if (!/heure|quel jour/.test(texte.toLowerCase())) imagePourSujet(texte);
   if (repliLocal && estQuestionWeb(texte)) { chercherWeb(texte); return; }
   window._repli = repliLocal;
   masquerSources();
@@ -838,6 +855,14 @@ function demarrerConversation() {
   primerAudio();
   conversationActive = true;
   document.getElementById("invite").textContent = "Conversation en cours — touche le bouton pour arrêter";
+  if (sessionStorage.getItem("mayela_accueil")) {
+    const reprise = choixVar("reprise", ["Je t'écoute, on continue !", "Te revoilà ! Dis-moi tout, je t'écoute.", "On reprend ! Je suis toute ouïe.", "Oui ? Je t'écoute, parle-moi."]);
+    document.getElementById("transcription").textContent = reprise;
+    setExpr("listening");
+    parler(reprise, () => setTimeout(ecouter, 300));
+    return;
+  }
+  try { sessionStorage.setItem("mayela_accueil", "1"); } catch(e) {}
   const mem = souvenirs(); const nomMem = mem.find(x => /appelle/i.test(x));
   const prenom = nomMem ? nomMem.replace("Il/elle s'appelle ","") : "";
   const salut = nomMem
