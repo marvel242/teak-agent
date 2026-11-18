@@ -257,9 +257,11 @@
     </div>
     <div class="ligne">Voix de TEAk<br>
       <select id="selVoix">
-        <option value="google">Voix Google (plus réaliste, internet requis)</option>
+        <option value="google">Voix Google (internet requis)</option>
         <option value="appareil">Voix de l'appareil (hors-ligne)</option>
       </select>
+    </div>
+    <div class="ligne">Astuce pour une voix très humaine : sur iPhone, va dans Réglages → Accessibilité → Contenu énoncé → Voix → Français, télécharge la voix « améliorée », puis choisis ici « Voix de l'appareil ».
     </div>
     <div class="ligne"><button class="btnAction" id="btnTesterVoix">Tester la voix</button></div>
     <div class="ligne">Hébergement : Cloudflare Pages, gratuit. Code source sur GitHub, modifiable à tout moment.</div>
@@ -354,7 +356,7 @@ function oublier(i) { const m = souvenirs(); m.splice(i,1); localStorage.setItem
 let voixChoisie = null;
 function chargerVoix() {
   const voix = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang));
-  const pref = ["Léa","Marie","Amélie","Audrey","Aurélie","Virginie","Julie","Céline","Siri","female","femme","Google français"];
+  const pref = ["Siri","Amélie","Audrey","Léa","Marie","Aurélie","Virginie","Julie","Céline","enhanced","premium","améliorée","female","femme","Google français"];
   voixChoisie = null;
   for (const nom of pref) { const v = voix.find(v => v.name.toLowerCase().includes(nom.toLowerCase())); if (v) { voixChoisie = v; break; } }
   if (!voixChoisie) voixChoisie = voix[0] || null;
@@ -379,9 +381,11 @@ function primerAudio() {
   if ("speechSynthesis" in window) { try { speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch(e) {} }
 }
 function modeVoix() { return localStorage.getItem("teak_voix") || "google"; }
+let sessionParole = 0;
 function arreterParole() {
-  if (audioEl) { try { audioEl.pause(); } catch(e) {} }
-  if (audioEnCours) { try { audioEnCours.pause(); } catch(e) {} audioEnCours = null; }
+  sessionParole++;
+  if (audioEl) { try { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); } catch(e) {} }
+  audioEnCours = null;
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 function decouperTexte(t) {
@@ -395,38 +399,52 @@ function decouperTexte(t) {
   return morceaux;
 }
 function parler(texte, suite) {
+  arreterParole();
+  const maSession = sessionParole;
   document.body.className = "parle";
   gererClignement(false);
   setStatut("TEAk parle…"); setEtatBouton("TEAk parle…");
   document.getElementById("invite").textContent = "TEAk te répond…";
-  arreterParole();
   let fini = false;
-  const terminer = () => { if (fini) return; fini = true; audioEnCours = null; document.body.className = ""; setEtatBouton(conversationActive ? "À toi de parler…" : "Touche pour parler"); if (suite) suite(); };
-  setTimeout(terminer, Math.max(9000, texte.length * 200)); /* filet de sécurité */
-  if (modeVoix() === "google") {
-    const morceaux = decouperTexte(texte);
-    let i = 0;
-    const jouer = () => {
-      if (fini) return;
-      if (i >= morceaux.length) { terminer(); return; }
-      const a = obtenirAudio();
-      a.src = "https://translate.google.com/translate_tts?ie=UTF-8&tl=fr&client=tw-ob&q=" + encodeURIComponent(morceaux[i]);
-      audioEnCours = a;
-      a.onended = () => { i++; jouer(); };
-      a.onerror = () => { if (!fini) parlerAppareil(texte, terminer); };
-      const pr = a.play(); if (pr && pr.catch) pr.catch(() => { if (!fini) parlerAppareil(texte, terminer); });
-    };
-    jouer();
-  } else {
-    parlerAppareil(texte, terminer);
-  }
+  const vivant = () => !fini && maSession === sessionParole;
+  const terminer = () => {
+    if (!vivant()) return;
+    fini = true; audioEnCours = null;
+    document.body.className = "";
+    setEtatBouton(conversationActive ? "À toi de parler…" : "Touche pour parler");
+    if (suite) suite();
+  };
+  setTimeout(terminer, Math.max(9000, texte.length * 280)); /* filet de sécurité */
+  if (modeVoix() === "google") jouerGoogle(texte, vivant, terminer);
+  else parlerAppareil(texte, vivant, terminer);
 }
-function parlerAppareil(texte, terminer) {
+function jouerGoogle(texte, vivant, terminer) {
+  const morceaux = decouperTexte(texte);
+  const a = obtenirAudio();
+  let i = 0, aCommence = false;
+  const repli = () => { if (vivant() && !aCommence && i === 0) parlerAppareil(texte, vivant, terminer); };
+  const jouer = () => {
+    if (!vivant()) return;
+    if (i >= morceaux.length) { terminer(); return; }
+    aCommence = false;
+    a.onplaying = () => { aCommence = true; };
+    a.onended = () => { if (!vivant()) return; i++; setTimeout(jouer, 130); };
+    a.onerror = () => { if (!vivant()) return; if (!aCommence && i === 0) repli(); else terminer(); };
+    a.src = "https://translate.google.com/translate_tts?ie=UTF-8&tl=fr&client=tw-ob&q=" + encodeURIComponent(morceaux[i]);
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch(() => { if (vivant() && !aCommence && i === 0) repli(); });
+  };
+  jouer();
+}
+function parlerAppareil(texte, vivant, terminer) {
+  if (audioEl) { try { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); } catch(e) {} }
   if (!("speechSynthesis" in window)) { terminer(); return; }
+  speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(texte);
   u.lang = "fr-FR"; if (voixChoisie) u.voice = voixChoisie;
-  u.pitch = 1.12; u.rate = 1.0;
-  u.onend = terminer; u.onerror = terminer;
+  u.pitch = 1.06; u.rate = 0.98;
+  u.onend = () => { if (vivant()) terminer(); };
+  u.onerror = () => { if (vivant()) terminer(); };
   speechSynthesis.speak(u);
 }
 
