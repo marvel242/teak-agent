@@ -257,6 +257,7 @@
     </div>
     <div class="ligne">Voix de TEAk<br>
       <select id="selVoix">
+        <option value="relai">Voix réaliste Eloise (internet requis)</option>
         <option value="google">Voix Google (internet requis)</option>
         <option value="appareil">Voix de l'appareil (hors-ligne)</option>
       </select>
@@ -380,11 +381,14 @@ function primerAudio() {
   } catch(e) {}
   if ("speechSynthesis" in window) { try { speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch(e) {} }
 }
-function modeVoix() { return localStorage.getItem("teak_voix") || "google"; }
+function modeVoix() { return localStorage.getItem("teak_voix") || "relai"; }
+const RELAIS_VOIX = "https://teak-voix.teakuniversalteakuniversal.workers.dev/";
+let urlObjetActuelle = null;
 let sessionParole = 0;
 function arreterParole() {
   sessionParole++;
   if (audioEl) { try { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); } catch(e) {} }
+  if (urlObjetActuelle) { try { URL.revokeObjectURL(urlObjetActuelle); } catch(e) {} urlObjetActuelle = null; }
   audioEnCours = null;
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
@@ -415,8 +419,40 @@ function parler(texte, suite) {
     if (suite) suite();
   };
   setTimeout(terminer, Math.max(9000, texte.length * 280)); /* filet de sécurité */
-  if (modeVoix() === "google") jouerGoogle(texte, vivant, terminer);
+  const mv = modeVoix();
+  if (mv === "relai") jouerRelai(texte, vivant, terminer);
+  else if (mv === "google") jouerGoogle(texte, vivant, terminer);
   else parlerAppareil(texte, vivant, terminer);
+}
+function jouerRelai(texte, vivant, terminer) {
+  const morceaux = decouperTexte(texte);
+  const a = obtenirAudio();
+  let i = 0, aCommence = false, promesseSuivante = null;
+  const demander = (idx) => fetch(RELAIS_VOIX + "?text=" + encodeURIComponent(morceaux[idx]))
+    .then(r => { if (!r.ok) throw new Error("relais " + r.status); return r.blob(); })
+    .then(b => URL.createObjectURL(b));
+  const repli = () => { if (vivant() && !aCommence && i === 0) jouerGoogle(texte, vivant, terminer); };
+  const jouer = () => {
+    if (!vivant()) return;
+    if (i >= morceaux.length) { terminer(); return; }
+    const p = promesseSuivante || demander(i); promesseSuivante = null;
+    p.then(url => {
+      if (!vivant()) { try { URL.revokeObjectURL(url); } catch(e) {} return; }
+      if (urlObjetActuelle) { try { URL.revokeObjectURL(urlObjetActuelle); } catch(e) {} }
+      urlObjetActuelle = url;
+      aCommence = false;
+      a.onplaying = () => {
+        aCommence = true;
+        if (i + 1 < morceaux.length && !promesseSuivante) { promesseSuivante = demander(i + 1); promesseSuivante.catch(() => { promesseSuivante = null; }); }
+      };
+      a.onended = () => { if (!vivant()) return; i++; setTimeout(jouer, 120); };
+      a.onerror = () => { if (!vivant()) return; if (!aCommence && i === 0) repli(); else terminer(); };
+      a.src = url;
+      const pr = a.play();
+      if (pr && pr.catch) pr.catch(() => { if (vivant() && !aCommence && i === 0) repli(); });
+    }).catch(() => { if (!vivant()) return; if (!aCommence && i === 0) repli(); else terminer(); });
+  };
+  jouer();
 }
 function jouerGoogle(texte, vivant, terminer) {
   const morceaux = decouperTexte(texte);
