@@ -2,7 +2,7 @@
 
 TEAk est une agente IA vocale congolaise, 100 % statique et gratuite :
 
-- **Micro au centre en 3D** : un toucher lance la conversation automatique — TEAk parle, écoute la réponse, répond, puis réécoute.
+- **Son visage animé au centre** : un personnage 3D aux 20 expressions (détourées, fond transparent) qui change d'émotion selon ses réponses. Un petit bouton en bas lance la conversation automatique — TEAk parle, écoute la réponse, répond, puis réécoute. Le bouton s'allume **rouge quand TEAk parle**, **vert quand l'utilisateur parle** ; quand elle écoute, elle porte la main à l'oreille et ses yeux clignotent.
 - **Voix féminine jeune** : synthèse vocale gratuite du navigateur (Web Speech API), voix française féminine choisie automatiquement, hauteur relevée.
 - **Français + Lingala** : lexique de phrases avec écoute, réponses en français, en lingala ou en mélange congolais.
 - **Connaissance du Congo Brazzaville** : départements, parcs (Odzala-Kokoua, Nouabalé-Ndoki), fleuve Congo, Sape, rumba, cuisine.
