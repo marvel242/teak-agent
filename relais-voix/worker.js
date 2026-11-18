@@ -235,3 +235,5 @@ function dateEdge() {
 function echapperXml(t) {
   return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
+
+/* Déploiement relais v1 — build déclenché après correction des commandes (build vide, deploy avec -c). */
