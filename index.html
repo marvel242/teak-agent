@@ -383,6 +383,7 @@ function primerAudio() {
 }
 function modeVoix() { return localStorage.getItem("teak_voix") || "relai"; }
 const RELAIS_VOIX = "https://teak-voix.teakuniversalteakuniversal.workers.dev/";
+const cacheVoix = new Map();
 let urlObjetActuelle = null;
 let sessionParole = 0;
 function libererAudio() {
@@ -397,14 +398,15 @@ function arreterParole() {
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
 function decouperTexte(t) {
-  const morceaux = []; let reste = t;
-  while (reste.length > 140) {
-    let coupe = Math.max(reste.lastIndexOf(". ", 140), reste.lastIndexOf("! ", 140), reste.lastIndexOf("? ", 140), reste.lastIndexOf(", ", 140));
-    if (coupe < 45) coupe = 140;
+  const morceaux = []; let reste = String(t || "");
+  while (reste.length > 0) {
+    const limite = morceaux.length === 0 ? 78 : 150;
+    if (reste.length <= limite) { morceaux.push(reste); break; }
+    let coupe = Math.max(reste.lastIndexOf(". ", limite), reste.lastIndexOf("! ", limite), reste.lastIndexOf("? ", limite), reste.lastIndexOf(", ", limite), reste.lastIndexOf(" ", limite));
+    if (coupe < 30) coupe = limite;
     morceaux.push(reste.slice(0, coupe + 1).trim()); reste = reste.slice(coupe + 1).trim();
   }
-  if (reste) morceaux.push(reste);
-  return morceaux;
+  return morceaux.filter(x => x);
 }
 function parler(texte, suite) {
   arreterParole();
@@ -423,7 +425,7 @@ function parler(texte, suite) {
     setEtatBouton(conversationActive ? "À toi de parler…" : "Touche pour parler");
     if (suite) suite();
   };
-  setTimeout(terminer, Math.max(9000, texte.length * 280)); /* filet de sécurité */
+  setTimeout(terminer, Math.max(6000, texte.length * 95 + 3500)); /* filet proportionnel à la durée estimée */
   const mv = modeVoix();
   if (mv === "relai") jouerRelai(texte, vivant, terminer);
   else if (mv === "google") jouerGoogle(texte, vivant, terminer);
@@ -433,9 +435,17 @@ function jouerRelai(texte, vivant, terminer) {
   const morceaux = decouperTexte(texte);
   const a = obtenirAudio();
   let i = 0, aCommence = false, promesseSuivante = null;
-  const demander = (idx) => fetch(RELAIS_VOIX + "?text=" + encodeURIComponent(morceaux[idx]))
-    .then(r => { if (!r.ok) throw new Error("relais " + r.status); return r.blob(); })
-    .then(b => URL.createObjectURL(b));
+  const demander = (idx) => {
+    const cle = morceaux[idx];
+    if (cacheVoix.has(cle)) return cacheVoix.get(cle);
+    const p = fetch(RELAIS_VOIX + "voix?text=" + encodeURIComponent(cle))
+      .then(r => { if (!r.ok) throw new Error("relais " + r.status); return r.blob(); })
+      .then(b => URL.createObjectURL(b));
+    cacheVoix.set(cle, p);
+    p.catch(() => cacheVoix.delete(cle));
+    if (idx === 0) return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("relais lent")), 3000))]);
+    return p;
+  };
   const repli = () => { if (vivant() && !aCommence && i === 0) jouerGoogle(texte, vivant, terminer); };
   const jouer = () => {
     if (!vivant()) return;
@@ -515,7 +525,7 @@ function afficherCarte(type) {
 }
 function masquerCarte() { document.getElementById("carteInfo").classList.remove("actif"); }
 
-/* ============ RECHERCHE WEB (Wikipédia, DuckDuckGo) ============ */
+/* ============ RECHERCHE WEB (Wikipédia) ============ */
 function estQuestionWeb(t) {
   const s = t.toLowerCase().trim();
   return /\?/.test(t) || /^(qui|que|quel|quelle|quels|quelles|comment|pourquoi|quand|où|combien|est-ce|c'est quoi|dis-moi|parle-moi de|raconte|cherche|trouve|explique|aide-moi|solution)/.test(s) || /c'est quoi|explique-moi|dis-moi|comment faire|comment on fait/.test(s);
@@ -527,16 +537,11 @@ function afficherSources(sources) {
   z.classList.add("actif");
 }
 function masquerSources() { const z = document.getElementById("sources"); z.classList.remove("actif"); z.innerHTML = ""; }
-async function chercherWeb(texte) {
+async function chercherWeb(texte, enEchec) {
   setExpr("search"); setStatut("Mayela cherche sur le web…"); setEtatBouton("Mayela cherche…");
   document.getElementById("transcription").textContent = "Je cherche sur le web…";
   const q = encodeURIComponent(texte);
   let rep = "", sources = [];
-  try {
-    const r = await fetch("https://api.duckduckgo.com/?q=" + q + "&format=json&no_html=1&skip_disambig=1");
-    const d = await r.json();
-    if (d.AbstractText) { rep = d.AbstractText; sources.push([d.AbstractSource || "DuckDuckGo", d.AbstractURL || ("https://duckduckgo.com/?q=" + q)]); if (d.Image) afficherImage("https://duckduckgo.com" + d.Image, "🖼️ " + texte, d.AbstractSource || ""); }
-  } catch(e) {}
   if (!rep) {
     try {
       const r2 = await fetch("https://fr.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages&exintro&explaintext&pithumbsize=800&generator=search&gsrsearch=" + q + "&gsrlimit=3&format=json&origin=*");
@@ -553,6 +558,7 @@ async function chercherWeb(texte) {
   }
   const apres = () => { if (conversationActive) setTimeout(ecouter, 350); else { setExpr("explain"); setStatut("Mayela est prête"); } };
   if (!rep) {
+    if (enEchec) { enEchec(); return; }
     masquerSources();
     const sec = "Je n'ai rien trouvé de sûr sur le web pour ça. Reformule ta question, ou demande-moi quelque chose sur le Congo, le pays, je le connais bien !";
     document.getElementById("transcription").textContent = sec;
@@ -595,7 +601,104 @@ let ecoutesSilencieuses = 0;
 let recoActif = false;
 let recoErreurs = 0;
 let recoWatchdog = null;
+let fluxMicro = null;
+let enregistreur = null;
+let modeEcoute = "auto";
+let erreursTranscription = 0;
+
 function ecouter() {
+  if (!conversationActive || recoActif) return;
+  if (modeEcoute !== "sr" && navigator.mediaDevices && window.MediaRecorder) { ecouterMicro(); return; }
+  ecouterSR();
+}
+async function ouvrirMicro() {
+  if (fluxMicro && fluxMicro.active) return fluxMicro;
+  fluxMicro = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return fluxMicro;
+}
+function fermerMicro() {
+  if (fluxMicro) { try { fluxMicro.getTracks().forEach(t => t.stop()); } catch(e) {} fluxMicro = null; }
+}
+function cycleSilencieux() {
+  if (!conversationActive) return;
+  ecoutesSilencieuses++;
+  if (ecoutesSilencieuses <= 5) setTimeout(() => { if (conversationActive) ecouter(); }, 250);
+  else { ecoutesSilencieuses = 0; document.body.className = ""; setStatut("Mayela est prête"); setEtatBouton("Touche pour parler"); setExpr("explain"); document.getElementById("invite").textContent = "Touche le bouton quand tu veux parler"; }
+}
+async function ecouterMicro() {
+  recoActif = true;
+  libererAudio();
+  document.body.className = "ecoute"; gererClignement(true);
+  setStatut("Mayela t'écoute…"); setEtatBouton("À toi de parler…");
+  setExpr("listening");
+  document.getElementById("invite").textContent = "Je t'écoute… parle tranquillement, je ne suis pas pressée";
+  let flux;
+  try { flux = await ouvrirMicro(); }
+  catch(e) { recoActif = false; modeEcoute = "sr"; ecouterSR(); return; }
+  if (!conversationActive) { recoActif = false; return; }
+  const typeMime = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", ""].find(t => { try { return !t || MediaRecorder.isTypeSupported(t); } catch(e) { return false; } });
+  let rec;
+  try { rec = typeMime ? new MediaRecorder(flux, { mimeType: typeMime }) : new MediaRecorder(flux); }
+  catch(e) { recoActif = false; modeEcoute = "sr"; ecouterSR(); return; }
+  enregistreur = rec;
+  const morceauxAudio = [];
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) morceauxAudio.push(e.data); };
+  let ctxAudio = null, aParle = false;
+  let dernierSon = Date.now();
+  try {
+    ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctxAudio.state === "suspended") ctxAudio.resume();
+    const sourceAudio = ctxAudio.createMediaStreamSource(flux);
+    const analyseur = ctxAudio.createAnalyser(); analyseur.fftSize = 512;
+    sourceAudio.connect(analyseur);
+    const donnees = new Uint8Array(analyseur.fftSize);
+    const surveiller = () => {
+      if (!enregistreur || enregistreur.state !== "recording") return;
+      analyseur.getByteTimeDomainData(donnees);
+      let somme = 0;
+      for (let i = 0; i < donnees.length; i++) { const v = (donnees[i] - 128) / 128; somme += v * v; }
+      if (Math.sqrt(somme / donnees.length) > 0.03) { aParle = true; dernierSon = Date.now(); }
+      if (aParle && Date.now() - dernierSon > 1100) { try { rec.stop(); } catch(e) {} return; }
+      if (!aParle && Date.now() - dernierSon > 12000) { try { rec.stop(); } catch(e) {} return; }
+      setTimeout(surveiller, 100);
+    };
+    setTimeout(surveiller, 120);
+    setTimeout(() => { if (enregistreur && enregistreur.state === "recording") { try { rec.stop(); } catch(e) {} } }, 30000);
+  } catch(e) {
+    setTimeout(() => { if (enregistreur && enregistreur.state === "recording") { try { rec.stop(); } catch(err) {} } }, 8000);
+  }
+  rec.onstop = async () => {
+    enregistreur = null;
+    if (ctxAudio) { try { ctxAudio.close(); } catch(e) {} }
+    recoActif = false;
+    if (!conversationActive) return;
+    if (!aParle || !morceauxAudio.length) { cycleSilencieux(); return; }
+    const blob = new Blob(morceauxAudio, { type: rec.mimeType || "audio/mp4" });
+    await transcrire(blob);
+  };
+  try { rec.start(250); } catch(e) { recoActif = false; modeEcoute = "sr"; ecouterSR(); }
+}
+async function transcrire(blob) {
+  document.body.className = "";
+  setStatut("Mayela réfléchit…"); setEtatBouton("Mayela réfléchit…");
+  try {
+    const r = await fetch(RELAIS_VOIX + "transcription", { method: "POST", headers: { "Content-Type": blob.type || "audio/mp4" }, body: blob });
+    if (!r.ok) throw new Error("transcription " + r.status);
+    const d = await r.json();
+    const texte = String(d.texte || "").trim();
+    if (!texte) { cycleSilencieux(); return; }
+    erreursTranscription = 0; ecoutesSilencieuses = 0;
+    document.getElementById("transcription").textContent = "« " + texte + " »";
+    setExpr("thinking");
+    setTimeout(() => repondre(texte), 150);
+  } catch(e) {
+    erreursTranscription++;
+    if (erreursTranscription >= 2) { modeEcoute = "sr"; erreursTranscription = 0; if (conversationActive) { setStatut("Je passe sur l'autre micro…"); setTimeout(ecouter, 300); } return; }
+    cycleSilencieux();
+  }
+}
+
+function ecouterSR() {
   if (!conversationActive || recoActif) return;
   if (!Reco) { setStatut("Micro non pris en charge ici — écris plutôt"); document.getElementById("zoneTexte").classList.add("actif"); conversationActive = false; setExpr("explain"); return; }
   libererAudio();
@@ -659,6 +762,7 @@ function ecouter() {
   try { reco.start(); } catch(e) { recoActif = false; setTimeout(ecouter, 1000); }
 }
 
+
 /* ============ CERVEAU LOCAL ============ */
 function langue() { return localStorage.getItem("teak_langue") || "mixte"; }
 function reponse(t) {
@@ -699,7 +803,7 @@ function reponse(t) {
   if (/lingala/.test(s)) return "Le lingala est la grande langue du fleuve, parlée à Brazzaville et dans tout le nord du pays. Quelques mots : Mbote = bonjour, Ndenge nini = comment ça va, Merci mingi = merci beaucoup. Ouvre le lexique avec les 3 points pour apprendre et écouter 20 phrases.";
   if (/mbote/.test(s)) return "Mbote na yo ! Bonjour à toi. Ndenge nini, comment ça va ?";
   if (/merci/.test(s)) return choixVar("merci", ["Merci mingi à toi aussi ! Avec plaisir, je suis là pour toi.", "De rien, c'est normal entre amis. Autre chose ?", "Avec grand plaisir ! Ça me fait plaisir de t'aider."]);
-  if (/au revoir|à bientôt|bonne nuit/.test(s)) { conversationActive = false; return "Kende malamu, au revoir ! Touche le bouton quand tu veux me reparler."; }
+  if (/au revoir|à bientôt|bonne nuit/.test(s)) { conversationActive = false; fermerMicro(); return "Kende malamu, au revoir ! Touche le bouton quand tu veux me reparler."; }
   if (/heure/.test(s)) return "Il est " + new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) + ".";
   if (/aujourd'hui|quel jour/.test(s)) return "Nous sommes le " + new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}) + ".";
   window._repli = true;
@@ -772,7 +876,12 @@ async function actualites(s) {
   document.getElementById("transcription").textContent = "Je regarde les dernières nouvelles pour toi…";
   const veutCongo = /brazzaville|congo|brazza|pays|échos|echos/.test(s);
   const flux = veutCongo ? SOURCES_INFOS.congo : SOURCES_INFOS.monde;
-  const resultats = await Promise.all(flux.map(async ([u, nomSource]) => {
+  let resultats = null;
+  try {
+    const rW = await fetch(RELAIS_VOIX + "infos?zone=" + (veutCongo ? "congo" : "monde"));
+    if (rW.ok) { const dW = await rW.json(); if (dW.items && dW.items.length) resultats = [dW.items]; }
+  } catch(e) {}
+  if (!resultats) resultats = await Promise.all(flux.map(async ([u, nomSource]) => {
     try {
       const r = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(u) + "&count=5");
       const d = await r.json();
@@ -954,12 +1063,40 @@ function repondre(texte) {
   const repliLocal = window._repli; window._repli = false;
   majCarteInfo(texte);
   if (!/heure|quel jour/.test(texte.toLowerCase())) imagePourSujet(texte);
-  if (repliLocal && estQuestionWeb(texte)) { chercherWeb(texte); return; }
-  window._repli = repliLocal;
+  if (repliLocal) {
+    if (estQuestionWeb(texte)) { chercherWeb(texte, () => demanderLLM(texte, rep)); return; }
+    demanderLLM(texte, rep);
+    return;
+  }
+  historiqueConv.push({ role: "user", content: texte }, { role: "assistant", content: rep });
+  if (historiqueConv.length > 12) historiqueConv = historiqueConv.slice(-12);
   masquerSources();
   document.getElementById("transcription").textContent = rep;
   setExpr(emotionPour(rep, texte));
-  parler(rep, () => { if (conversationActive) setTimeout(ecouter, 350); else { setExpr("explain"); setStatut("Mayela est prête"); } });
+  parler(rep, apresParole);
+}
+
+let historiqueConv = [];
+async function demanderLLM(texte, repliTexte) {
+  setExpr("thinking"); setStatut("Mayela réfléchit…"); setEtatBouton("Mayela réfléchit…");
+  try {
+    const r = await fetch(RELAIS_VOIX + "conversation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: texte, souvenirs: souvenirs().map(x => x.texte), historique: historiqueConv.slice(-6) }) });
+    if (!r.ok) throw new Error("conversation " + r.status);
+    const d = await r.json();
+    const rep = String(d.reponse || "").trim();
+    if (!rep) throw new Error("réponse vide");
+    historiqueConv.push({ role: "user", content: texte }, { role: "assistant", content: rep });
+    if (historiqueConv.length > 12) historiqueConv = historiqueConv.slice(-12);
+    masquerSources();
+    document.getElementById("transcription").textContent = rep;
+    setExpr(emotionPour(rep, texte));
+    parler(rep, apresParole);
+  } catch(e) {
+    masquerSources();
+    document.getElementById("transcription").textContent = repliTexte;
+    setExpr(emotionPour(repliTexte, texte));
+    parler(repliTexte, apresParole);
+  }
 }
 
 /* ============ CONVERSATION AUTOMATIQUE (petit bouton) ============ */
@@ -989,6 +1126,8 @@ function demarrerConversation() {
 document.getElementById("btnParole").addEventListener("click", () => {
   if (conversationActive) {
     conversationActive = false;
+    if (enregistreur) try { enregistreur.stop(); } catch(e) {}
+    fermerMicro();
     if (reco) try { reco.stop(); } catch(e) {}
     arreterParole(); document.body.className = "";
     gererClignement(false);
@@ -1018,7 +1157,7 @@ document.getElementById("zoneTexte").addEventListener("submit", (e) => {
   e.preventDefault();
   const champ = document.getElementById("champTexte");
   if (!champ.value.trim()) return;
-  conversationActive = false;
+  conversationActive = false; fermerMicro();
   const v = champ.value.trim(); champ.value = "";
   document.getElementById("transcription").textContent = "« " + v + " »";
   setExpr("thinking");

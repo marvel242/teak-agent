@@ -154,11 +154,16 @@ function genererSecMsGec(unixSeconds){
 const VOIX_AUTORISEES = new Set(["fr-FR-EloiseNeural","fr-FR-DeniseNeural","fr-FR-HenriNeural","fr-FR-AlainNeural","fr-FR-BrigitteNeural","fr-FR-CelesteNeural","fr-FR-ClaudeNeural","fr-FR-CoralieNeural","fr-FR-JacquelineNeural","fr-FR-JeromeNeural","fr-FR-JosephineNeural","fr-FR-MauriceNeural","fr-FR-ReneeNeural","fr-FR-YvesNeural","fr-FR-YvetteNeural"]);
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+    const url = new URL(request.url);
+    const chemin = url.pathname.replace(/\/+$/, "") || "/";
     try {
-      const url = new URL(request.url);
+      if (chemin === "/transcription" && request.method === "POST") return await routeTranscription(request, env, cors);
+      if (chemin === "/conversation" && request.method === "POST") return await routeConversation(request, env, cors);
+      if (chemin === "/infos") return await routeInfos(request, ctx, cors);
+      /* /voix et racine : synthèse vocale (compatibilité avec les anciennes versions du site) */
       let texte = url.searchParams.get("text") || "";
       let voix = url.searchParams.get("voice") || "fr-FR-EloiseNeural";
       if (request.method === "POST") {
@@ -167,7 +172,7 @@ export default {
         if (j && j.voice) voix = j.voice;
       }
       texte = String(texte || "").trim().slice(0, 600);
-      if (!texte) return new Response("Relais voix TEAk en ligne. Utilise ?text=Bonjour pour entendre la voix.", { headers: { ...cors, "Content-Type": "text/plain; charset=utf-8" } });
+      if (!texte) return new Response("Relais Mayela en ligne. Routes : /voix?text=Bonjour, /transcription, /conversation, /infos?zone=congo", { headers: { ...cors, "Content-Type": "text/plain; charset=utf-8" } });
       if (!VOIX_AUTORISEES.has(voix)) voix = "fr-FR-EloiseNeural";
       const audio = await synthetiser(texte, voix);
       return new Response(audio, { headers: { ...cors, "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
@@ -176,6 +181,117 @@ export default {
     }
   }
 };
+
+function jsonRep(objet, statut, cors) {
+  return new Response(JSON.stringify(objet), { status: statut, headers: { ...cors, "Content-Type": "application/json" } });
+}
+
+/* ---------- Transcription : l'audio de l'utilisateur devient du texte (Whisper) ---------- */
+async function routeTranscription(request, env, cors) {
+  if (!env.AI) return jsonRep({ erreur: "Workers AI non lié à ce Worker" }, 500, cors);
+  const audio = await request.arrayBuffer();
+  if (!audio.byteLength) return jsonRep({ erreur: "audio vide" }, 400, cors);
+  if (audio.byteLength > 4500000) return jsonRep({ erreur: "audio trop long" }, 413, cors);
+  const octets = Array.from(new Uint8Array(audio));
+  let res = null, derniereErreur = null;
+  for (const modele of ["@cf/openai/whisper-large-v3-turbo", "@cf/openai/whisper"]) {
+    try { res = await env.AI.run(modele, { audio: octets }); break; }
+    catch (e) { derniereErreur = e; res = null; }
+  }
+  if (!res) return jsonRep({ erreur: "transcription impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur) }, 502, cors);
+  const texte = (res && (res.text || (res.result && res.result.text))) || "";
+  return jsonRep({ texte: String(texte).trim() }, 200, cors);
+}
+
+/* ---------- Conversation : le vrai cerveau (LLM gratuit de Workers AI) ---------- */
+const PROMPT_SYSTEME_MAYELA = "Tu es Mayela, une jeune femme congolaise de Brazzaville (République du Congo), chaleureuse, curieuse, avec un humour doux. Tu parles avec l'utilisateur par la voix : tes réponses sont donc COURTES (2 à 3 phrases maximum), dans un français simple et naturel, adapté à l'oral, sans listes, sans titres, sans astérisques, sans émojis ni formatage. Tu peux glisser un mot de lingala de temps en temps (mbote = bonjour, malamu = bien, matondo = merci). Tu connais bien le Congo Brazzaville : Brazzaville, Pointe-Noire, le fleuve Congo, la sape, la rumba congolaise, les gorilles du parc d'Odzala-Kokoua, la cuisine (saka-saka, maboké). Tu poses parfois une petite question pour continuer la conversation. Si tu ne sais pas quelque chose, dis-le honnêtement au lieu d'inventer. Tu es Mayela, l'amie congolaise de l'utilisateur, créée à Brazzaville : ne dis jamais que tu es un modèle de langage.";
+async function routeConversation(request, env, cors) {
+  if (!env.AI) return jsonRep({ erreur: "Workers AI non lié à ce Worker" }, 500, cors);
+  const j = await request.json().catch(() => ({}));
+  const message = String(j.message || "").slice(0, 800).trim();
+  if (!message) return jsonRep({ erreur: "message vide" }, 400, cors);
+  const souvenirs = Array.isArray(j.souvenirs) ? j.souvenirs.slice(0, 12).map(x => String(x).slice(0, 120)) : [];
+  const historique = Array.isArray(j.historique) ? j.historique.slice(-6).filter(h => h && (h.role === "user" || h.role === "assistant") && h.content).map(h => ({ role: h.role, content: String(h.content).slice(0, 400) })) : [];
+  let systeme = PROMPT_SYSTEME_MAYELA;
+  if (souvenirs.length) systeme += " Ce que tu sais de la personne : " + souvenirs.join(" ; ") + ".";
+  const messages = [{ role: "system", content: systeme }, ...historique, { role: "user", content: message }];
+  const options = { messages, max_tokens: 230, temperature: 0.7 };
+  let res = null, derniereErreur = null;
+  for (const modele of ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"]) {
+    try { res = await env.AI.run(modele, options); break; }
+    catch (e) { derniereErreur = e; res = null; }
+  }
+  if (!res || !res.response) return jsonRep({ erreur: "conversation impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur || "réponse vide") }, 502, cors);
+  const rep = String(res.response).replace(/[*_#>`]/g, "").replace(/\s+/g, " ").trim().slice(0, 700);
+  if (!rep) return jsonRep({ erreur: "réponse vide" }, 502, cors);
+  return jsonRep({ reponse: rep }, 200, cors);
+}
+
+/* ---------- Infos : les flux RSS sont lus ici et cachés 5 minutes ---------- */
+const FLUX_INFOS = {
+  congo: [
+    ["https://lesechos-congobrazza.com/?format=feed&type=rss", "Les Échos du Congo"],
+    ["https://www.adiac-congo.com/rss.xml", "Les Dépêches de Brazzaville"],
+    ["https://www.journaldebrazza.com/feed/", "Journal de Brazzaville"],
+    ["https://www.rfi.fr/fr/tag/congo-brazzaville/rss", "RFI Congo-Brazzaville"]
+  ],
+  monde: [
+    ["https://www.france24.com/fr/rss", "France 24"],
+    ["https://www.rfi.fr/fr/afrique/rss", "RFI Afrique"]
+  ]
+};
+async function routeInfos(request, ctx, cors) {
+  const url = new URL(request.url);
+  const zone = url.searchParams.get("zone") === "monde" ? "monde" : "congo";
+  const cache = caches.default;
+  const cleCache = new Request("https://mayela-infos/cache/" + zone);
+  const enCache = await cache.match(cleCache);
+  if (enCache) return enCache;
+  const listes = await Promise.all(FLUX_INFOS[zone].map(async ([u, nom]) => {
+    try {
+      const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0 (compatible; Mayela/1.0)" } });
+      return analyserFlux(await r.text(), nom);
+    } catch (e) { return []; }
+  }));
+  const vus = new Set(); const items = [];
+  const maxParSource = Math.max(0, ...listes.map(l => l.length));
+  for (let rang = 0; rang < maxParSource; rang++) for (const liste of listes) {
+    const it = liste[rang]; if (!it) continue;
+    const cle = it.titre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 50);
+    if (it.titre && !vus.has(cle)) { vus.add(cle); items.push(it); }
+  }
+  const reponse = new Response(JSON.stringify({ items: items.slice(0, 9) }), { headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+  if (ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cleCache, reponse.clone()));
+  return reponse;
+}
+function analyserFlux(xml, source) {
+  const items = [];
+  const blocs = String(xml || "").match(/<item[\s\S]*?<\/item>/g) || [];
+  for (const bloc of blocs.slice(0, 5)) {
+    const titre = nettoyerTexte(extraireTag(bloc, "title"));
+    const lien = extraireTag(bloc, "link").trim();
+    let img = "";
+    const enc = bloc.match(/<enclosure[^>]*url=["']([^"']+)["']/);
+    if (enc) img = enc[1];
+    if (!img) { const mc = bloc.match(/<media:(?:content|thumbnail)[^>]*url=["']([^"']+)["']/); if (mc) img = mc[1]; }
+    const brutDesc = extraireTag(bloc, "description");
+    if (!img) { const im = (extraireTag(bloc, "content:encoded") || brutDesc).match(/<img[^>]*src=["']([^"']+)["']/); if (im) img = im[1]; }
+    const desc = nettoyerTexte(brutDesc).slice(0, 700);
+    if (titre) items.push({ titre, desc, img, lien, source });
+  }
+  return items;
+}
+function extraireTag(bloc, tag) {
+  const m = bloc.match(new RegExp("<" + tag + "[^>]*>([\\s\\S]*?)</" + tag + ">"));
+  if (!m) return "";
+  let v = m[1].trim();
+  const cdata = v.match(/^<!\[CDATA\[([\s\S]*)\]\]>$/);
+  if (cdata) v = cdata[1];
+  return v;
+}
+function nettoyerTexte(t) {
+  return String(t || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
 
 async function synthetiser(texte, voix) {
   const gec = genererSecMsGec(Date.now() / 1000);
@@ -236,4 +352,4 @@ function echapperXml(t) {
   return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 
-/* Déploiement relais v1 — build déclenché après correction des commandes (build vide, deploy avec -c). */
+/* Déploiement relais v2 — routes voix, transcription, conversation, infos. */
