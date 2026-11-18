@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TEAk agent</title>
+<meta name="description" content="TEAk, agente IA vocale du Congo Brazzaville. Parle-lui au micro, en français et en lingala.">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color:#fff; overflow:hidden;
+    background: linear-gradient(160deg,#052e22 0%,#0a5c36 28%,#0e7a5f 48%,#b3541e 78%,#3b1054 100%);
+    background-size: 200% 200%;
+    animation: fond 18s ease-in-out infinite alternate;
+  }
+  @keyframes fond { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+  body::before {
+    content:""; position:fixed; inset:0;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 88%, rgba(255,170,60,.35), transparent 70%),
+      radial-gradient(ellipse 50% 35% at 20% 15%, rgba(0,255,180,.18), transparent 70%),
+      radial-gradient(ellipse 45% 30% at 85% 20%, rgba(120,80,255,.22), transparent 70%);
+    pointer-events:none;
+  }
+  #app { position:relative; height:100dvh; display:flex; flex-direction:column; align-items:center; }
+  header { width:100%; display:flex; justify-content:space-between; align-items:center; padding:14px 16px; z-index:5; }
+  #statut { font-size:13px; opacity:.85; display:flex; align-items:center; gap:7px; }
+  #statut .dot { width:9px; height:9px; border-radius:50%; background:#7dffb0; box-shadow:0 0 8px #7dffb0; }
+  body.ecoute #statut .dot { background:#ff5b5b; box-shadow:0 0 10px #ff5b5b; }
+  body.parle #statut .dot { background:#ffd257; box-shadow:0 0 10px #ffd257; }
+  #btnMenu {
+    width:44px; height:44px; border-radius:50%; border:1px solid rgba(255,255,255,.35);
+    background:rgba(0,0,0,.25); color:#fff; font-size:22px; cursor:pointer; backdrop-filter: blur(6px);
+  }
+  main { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; width:100%; }
+  #scene { perspective: 900px; display:flex; flex-direction:column; align-items:center; }
+  #micro {
+    width:190px; height:190px; border-radius:50%; border:none; cursor:pointer; position:relative;
+    background: radial-gradient(circle at 32% 28%, #d8ffe9 0%, #4ade80 30%, #16a34a 62%, #065f2e 100%);
+    box-shadow: 0 30px 60px rgba(0,0,0,.45), inset 0 -18px 30px rgba(0,0,0,.35), inset 0 14px 24px rgba(255,255,255,.45), 0 0 0 14px rgba(255,255,255,.08), 0 0 90px rgba(74,222,128,.45);
+    transform-style: preserve-3d;
+    animation: flotte 4.5s ease-in-out infinite;
+    transition: background .4s, box-shadow .4s;
+    display:flex; align-items:center; justify-content:center;
+  }
+  @keyframes flotte { 0%,100% { transform: translateY(0) rotateX(6deg); } 50% { transform: translateY(-12px) rotateX(-4deg); } }
+  #micro svg { width:86px; height:86px; filter: drop-shadow(0 6px 8px rgba(0,0,0,.35)); }
+  #micro::after {
+    content:""; position:absolute; inset:-26px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.35); transform: rotateX(72deg);
+  }
+  body.ecoute #micro {
+    background: radial-gradient(circle at 32% 28%, #ffe3e3 0%, #f87171 30%, #dc2626 62%, #7f1d1d 100%);
+    box-shadow: 0 30px 60px rgba(0,0,0,.45), inset 0 -18px 30px rgba(0,0,0,.35), inset 0 14px 24px rgba(255,255,255,.45), 0 0 0 14px rgba(255,255,255,.08), 0 0 100px rgba(248,113,113,.7);
+    animation: flotte 1.2s ease-in-out infinite;
+  }
+  body.parle #micro {
+    background: radial-gradient(circle at 32% 28%, #fff6d8 0%, #fcd34d 30%, #d97706 62%, #78350f 100%);
+    box-shadow: 0 30px 60px rgba(0,0,0,.45), inset 0 -18px 30px rgba(0,0,0,.35), inset 0 14px 24px rgba(255,255,255,.45), 0 0 0 14px rgba(255,255,255,.08), 0 0 100px rgba(252,211,77,.65);
+  }
+  #ombre { width:150px; height:22px; margin-top:34px; border-radius:50%; background:rgba(0,0,0,.35); filter: blur(8px); animation: ombre 4.5s ease-in-out infinite; }
+  @keyframes ombre { 0%,100% { transform: scaleX(1); opacity:.8; } 50% { transform: scaleX(.82); opacity:.55; } }
+  #invite { font-size:17px; font-weight:600; text-shadow:0 2px 10px rgba(0,0,0,.4); padding:0 24px; text-align:center; min-height:24px; }
+  #transcription { font-size:14px; opacity:.85; padding:0 28px; text-align:center; max-width:520px; min-height:20px; font-style:italic; }
+  #btnEcrire {
+    background:rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.3); color:#fff;
+    padding:9px 18px; border-radius:999px; font-size:14px; cursor:pointer; backdrop-filter: blur(6px);
+  }
+  #zoneTexte { display:none; width:min(92vw,520px); gap:8px; margin-bottom:18px; }
+  #zoneTexte.actif { display:flex; }
+  #champTexte { flex:1; padding:12px 14px; border-radius:14px; border:none; font-size:15px; }
+  #btnEnvoyer { padding:12px 16px; border-radius:14px; border:none; background:#16a34a; color:#fff; font-weight:700; cursor:pointer; }
+  /* Menu et panneaux */
+  #menu, .panneau {
+    position:fixed; inset:0; background:rgba(4,20,14,.72); backdrop-filter: blur(8px);
+    display:none; z-index:20; overflow-y:auto; padding:20px 16px 40px;
+  }
+  #menu.actif, .panneau.actif { display:block; }
+  .carte { max-width:560px; margin:0 auto; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); border-radius:20px; padding:18px; }
+  .carte h2 { font-size:19px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; }
+  .fermer { background:none; border:none; color:#fff; font-size:24px; cursor:pointer; }
+  .itemMenu {
+    display:block; width:100%; text-align:left; padding:15px 14px; margin-bottom:10px;
+    background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.12); border-radius:14px;
+    color:#fff; font-size:16px; cursor:pointer;
+  }
+  .itemMenu small { display:block; opacity:.75; font-size:13px; margin-top:3px; }
+  .ligne { padding:10px 4px; border-bottom:1px solid rgba(255,255,255,.1); font-size:15px; line-height:1.45; }
+  .ligne b { color:#a7f3c9; }
+  select, .btnAction {
+    background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.25);
+    border-radius:10px; padding:9px 12px; font-size:15px; cursor:pointer;
+  }
+  select option { color:#111; }
+  .btnDanger { background:rgba(220,38,38,.35); border-color:rgba(255,120,120,.5); }
+  .espace { height:12px; }
+  #ajoutMemoire, #ajoutPhrase { display:flex; gap:8px; margin-top:12px; }
+  #ajoutMemoire input, #ajoutPhrase input { flex:1; padding:10px; border-radius:10px; border:none; font-size:14px; min-width:0; }
+  .suppr { float:right; background:none; border:none; color:#fca5a5; font-size:16px; cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div id="statut"><span class="dot"></span><span id="statutTexte">TEAk est prête</span></div>
+    <button id="btnMenu" aria-label="Autres options">⋯</button>
+  </header>
+  <main>
+    <div id="scene">
+      <button id="micro" aria-label="Parler à TEAk">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2.5" width="6" height="11" rx="3" fill="rgba(255,255,255,.25)"/>
+          <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/>
+          <line x1="12" y1="18" x2="12" y2="21.5"/>
+          <line x1="8.5" y1="21.5" x2="15.5" y2="21.5"/>
+        </svg>
+      </button>
+      <div id="ombre"></div>
+    </div>
+    <div id="invite">Touche le micro et parle-moi</div>
+    <div id="transcription"></div>
+    <button id="btnEcrire">Écrire plutôt</button>
+    <form id="zoneTexte">
+      <input id="champTexte" type="text" placeholder="Écris ton message à TEAk…" autocomplete="off">
+      <button id="btnEnvoyer" type="submit">Envoyer</button>
+    </form>
+  </main>
+</div>
+
+<!-- MENU 3 POINTS -->
+<div id="menu">
+  <div class="carte">
+    <h2>Options <button class="fermer" data-fermer="menu">×</button></h2>
+    <button class="itemMenu" data-panneau="panneauCongo">🇨🇬 Découvrir le Congo<small>Départements, lieux, plats, culture</small></button>
+    <button class="itemMenu" data-panneau="panneauLingala">🗣️ Lingala<small>Phrases utiles, touche pour écouter</small></button>
+    <button class="itemMenu" data-panneau="panneauMemoire">🧠 Mémoire<small>Ce que TEAk retient de toi</small></button>
+    <button class="itemMenu" data-panneau="panneauReglages">⚙️ Réglages<small>Langue, voix, conversation automatique</small></button>
+  </div>
+</div>
+
+<!-- CONGO -->
+<div class="panneau" id="panneauCongo">
+  <div class="carte">
+    <h2>Découvrir le Congo <button class="fermer" data-fermer="panneauCongo">×</button></h2>
+    <div id="contenuCongo"></div>
+  </div>
+</div>
+
+<!-- LINGALA -->
+<div class="panneau" id="panneauLingala">
+  <div class="carte">
+    <h2>Lingala <button class="fermer" data-fermer="panneauLingala">×</button></h2>
+    <div id="contenuLingala"></div>
+    <form id="ajoutPhrase">
+      <input id="phraseFr" type="text" placeholder="En français…">
+      <input id="phraseLn" type="text" placeholder="En lingala…">
+      <button class="btnAction" type="submit">＋</button>
+    </form>
+  </div>
+</div>
+
+<!-- MEMOIRE -->
+<div class="panneau" id="panneauMemoire">
+  <div class="carte">
+    <h2>Mémoire de TEAk <button class="fermer" data-fermer="panneauMemoire">×</button></h2>
+    <div id="contenuMemoire"></div>
+    <form id="ajoutMemoire">
+      <input id="nouveauSouvenir" type="text" placeholder="Dis à TEAk de retenir quelque chose…">
+      <button class="btnAction" type="submit">Retiens</button>
+    </form>
+    <div class="espace"></div>
+    <button class="btnAction btnDanger" id="btnToutEffacer">Tout effacer</button>
+  </div>
+</div>
+
+<!-- REGLAGES -->
+<div class="panneau" id="panneauReglages">
+  <div class="carte">
+    <h2>Réglages <button class="fermer" data-fermer="panneauReglages">×</button></h2>
+    <div class="ligne">Langue de TEAk<br>
+      <select id="selLangue">
+        <option value="mixte">Français + Lingala (congolais)</option>
+        <option value="fr">Français seulement</option>
+        <option value="ln">Lingala seulement</option>
+      </select>
+    </div>
+    <div class="ligne">Voix : jeune femme, choisie automatiquement parmi les voix françaises féminines de ton appareil.</div>
+    <div class="ligne"><button class="btnAction" id="btnTesterVoix">Tester la voix</button></div>
+    <div class="ligne">Hébergement : Cloudflare Pages, gratuit. Code source sur GitHub, modifiable à tout moment.</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============ DONNÉES : CONGO BRAZZAVILLE ============ */
+const DEPARTEMENTS = [
+  ["Brazzaville","capitale du pays"],["Pointe-Noire","capitale économique, le port et le pétrole"],
+  ["Plateaux","Batéké, Djambala"],["Cuvette","Owando, les marécages"],["Cuvette-Ouest","Ewo"],
+  ["Niari","Dolisie, la vallée fertile"],["Lékoumou","Sibiti"],["Bouenza","Madingou, le grenier du pays"],
+  ["Pool","Kinkala, autour de Brazzaville"],["Kouilou","Loango, la côte historique"],
+  ["Sangha","Ouesso, la grande forêt du nord"],["Likouala","Impfondo, forêt et Lac Télé"]
+];
+const LIEUX = [
+  ["Parc national d'Odzala-Kokoua","créé en 1935, un des plus anciens d'Afrique : gorilles des plaines, éléphants de forêt et grandes clairières salées, les baïs."],
+  ["Parc national de Nouabalé-Ndoki","la forêt intacte du nord, les chimpanzés et la clairière de Mbeli Baï."],
+  ["Le fleuve Congo","deuxième fleuve du monde par son débit. Brazzaville et Kinshasa, les deux capitales les plus proches du monde, se font face sur ses rives."],
+  ["Basilique Sainte-Anne de Brazzaville","construite en 1949, symbole de la capitale avec ses tuiles vertes."],
+  ["Réserve de gorilles de Lesio-Louna","près de Brazzaville, réintroduction de gorilles orphelins."],
+  ["Lac Télé (Likouala)","lac en forme de cercle parfait au cœur de la forêt inondée, terre de légendes."]
+];
+const PLATS = [
+  ["Saka-saka","feuilles de manioc pilées, le plat national."],["Pondu","feuilles de manioc au poisson fumé."],
+  ["Maboké","poisson du fleuve cuit dans des feuilles de bananier."],["Fumbwa","feuilles de la forêt à la pâte d'arachide."],
+  ["Makayabu","poisson salé, souvent avec des légumes."],["Kwanga","pâte de manioc fermentée, l'accompagnement de tous les jours."]
+];
+let PHRASES = JSON.parse(localStorage.getItem("teak_phrases") || "null") || [
+  ["Bonjour","Mbote"],["Comment ça va ?","Ndenge nini ?"],["Je vais bien","Nazali malamu"],
+  ["Merci beaucoup","Mingi merci / Merci mingi"],["Bienvenue","Boyei malamu"],
+  ["Comment tu t'appelles ?","Nkombo na yo nani ?"],["Je m'appelle…","Nkombo na ngai…"],
+  ["Tu viens d'où ?","Owuti wapi ?"],["Je viens de Brazzaville","Nawuti Brazzaville"],
+  ["Allons-y","Tokende"],["À bientôt","Kino mbala mosusu"],["Oui","Iyo"],["Non","Te"],
+  ["Je t'aime","Nalingi yo"],["Bonne nuit","Butu elamu"],["Au revoir","Kende malamu"],
+  ["Combien ça coûte ?","Ndenge boni ? / Talo boni ?"],["Je ne comprends pas","Nazali koyoka te"],
+  ["Parle doucement","Loba malembe"],["Félicitations","Longonya"]
+];
+
+/* ============ MÉMOIRE (locale, dans l'appareil) ============ */
+function souvenirs() { return JSON.parse(localStorage.getItem("teak_memoire") || "[]"); }
+function retenir(texte) {
+  const m = souvenirs();
+  if (!m.some(s => s.texte.toLowerCase() === texte.toLowerCase())) {
+    m.push({ texte, date: new Date().toLocaleDateString("fr-FR") });
+    localStorage.setItem("teak_memoire", JSON.stringify(m));
+  }
+  afficherMemoire();
+}
+function oublier(i) { const m = souvenirs(); m.splice(i,1); localStorage.setItem("teak_memoire", JSON.stringify(m)); afficherMemoire(); }
+
+/* ============ VOIX : jeune femme ============ */
+let voixChoisie = null;
+function chargerVoix() {
+  const voix = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang));
+  const pref = ["Amélie","Audrey","Aurélie","Virginie","Marie","Julie","Céline","female","femme","Google français"];
+  voixChoisie = null;
+  for (const nom of pref) { const v = voix.find(v => v.name.toLowerCase().includes(nom.toLowerCase())); if (v) { voixChoisie = v; break; } }
+  if (!voixChoisie) voixChoisie = voix[0] || null;
+}
+if ("speechSynthesis" in window) { chargerVoix(); speechSynthesis.onvoiceschanged = chargerVoix; }
+
+let conversationActive = false;
+function parler(texte, suite) {
+  document.body.className = "parle";
+  setStatut("TEAk parle…");
+  if (!("speechSynthesis" in window)) { if (suite) suite(); return; }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(texte);
+  u.lang = "fr-FR"; if (voixChoisie) u.voice = voixChoisie;
+  u.pitch = 1.35; u.rate = 1.02;
+  let fini = false;
+  const terminer = () => { if (fini) return; fini = true; document.body.className = ""; if (suite) suite(); };
+  u.onend = terminer; u.onerror = terminer;
+  setTimeout(terminer, Math.max(4000, texte.length * 220)); /* filet de sécurité */
+  speechSynthesis.speak(u);
+}
+
+/* ============ ÉCOUTE ============ */
+const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
+let reco = null;
+function ecouter() {
+  if (!conversationActive) return;
+  if (!Reco) { setStatut("Micro non pris en charge ici — écris plutôt"); document.getElementById("zoneTexte").classList.add("actif"); conversationActive = false; return; }
+  reco = new Reco();
+  reco.lang = "fr-FR"; reco.interimResults = false; reco.maxAlternatives = 1;
+  document.body.className = "ecoute"; setStatut("TEAk t'écoute…");
+  document.getElementById("invite").textContent = "Je t'écoute…";
+  reco.onresult = (e) => {
+    const texte = e.results[0][0].transcript.trim();
+    document.getElementById("transcription").textContent = "« " + texte + " »";
+    document.body.className = "";
+    repondre(texte);
+  };
+  reco.onerror = () => { document.body.className = ""; if (conversationActive) setTimeout(ecouter, 1200); };
+  reco.onend = () => { if (document.body.className === "ecoute") document.body.className = ""; };
+  try { reco.start(); } catch(e) { setTimeout(ecouter, 1000); }
+}
+
+/* ============ CERVEAU LOCAL ============ */
+function langue() { return localStorage.getItem("teak_langue") || "mixte"; }
+function reponse(t) {
+  const s = t.toLowerCase();
+  const mem = souvenirs().map(x => x.texte);
+  const nomMem = mem.find(x => /appelle/i.test(x));
+  /* apprentissage / mémoire */
+  let m;
+  if ((m = t.match(/je m'appelle\s+(.+)/i))) { retenir("Il/elle s'appelle " + m[1].trim()); return repondreNom(m[1].trim()); }
+  if ((m = t.match(/j'habite\s+(?:à|a|au|en)?\s*(.+)/i))) { retenir("Il/elle habite " + m[1].trim()); return "Malamu ! Je retiens que tu habites " + m[1].trim() + ". Je m'en souviendrai."; }
+  if ((m = t.match(/j'aime\s+(.+)/i))) { retenir("Il/elle aime " + m[1].trim()); return "Noté dans ma mémoire : tu aimes " + m[1].trim() + ". Merci de me l'avoir dit !"; }
+  if (/retiens|retient|n'oublie pas|souviens/.test(s)) { retenir(t); return "C'est noté dans ma mémoire, je ne l'oublierai pas."; }
+  if (/mon nom|je m'appelle comment|comment je m'appelle/.test(s)) return nomMem ? "Bien sûr que je m'en souviens : " + nomMem.replace("Il/elle s'appelle ","tu t'appelles ") + "." : "Tu ne me l'as pas encore dit. Dis-moi : je m'appelle, et ton prénom, et je le retiendrai.";
+  if (/tu te souviens|souvenirs|ta mémoire|que sais-tu de moi/.test(s)) return mem.length ? "Voici ce que je retiens de toi : " + mem.join(" ; ") + "." : "Pour l'instant je ne sais encore rien de toi. Dis-moi ton prénom, ta ville, ce que tu aimes, et je le retiendrai.";
+  /* salutations */
+  if (/^(mbote|bonjour|bonsoir|salut|hello)/.test(s)) return langue() === "fr" ? "Bonjour ! Je suis TEAk, ton agente du Congo. De quoi veux-tu parler : du pays, du lingala, ou de toi ?" : "Mbote ! Nazali TEAk, agente na yo ya Congo. Olengi tosolola na nini : mboka, lingala, to yo moko ?";
+  if (/ndenge nini|comment (ça va|vas-tu|allez)/.test(s)) return "Nazali malamu, merci ! Je vais très bien. Et toi, ndenge nini ?";
+  /* identité */
+  if (/qui es-tu|ton nom|tu t'appelles|présente/.test(s)) return "Je suis TEAk, une agente intelligente congolaise. Je parle français et lingala, je connais tout le Congo Brazzaville, et je retiens ce qu'on me confie. Mbote na yo !";
+  if (/quel âge|ton âge/.test(s)) return "Je suis une intelligence artificielle, je n'ai pas d'âge, mais ma voix est celle d'une jeune femme, comme on m'a créée.";
+  /* Congo */
+  if (/capitale/.test(s) && /économ/.test(s)) return "La capitale économique, c'est Pointe-Noire : le grand port sur l'océan Atlantique et le cœur du pétrole congolais.";
+  if (/capitale/.test(s)) return "La capitale du Congo Brazzaville, c'est Brazzaville, sur la rive droite du fleuve Congo, face à Kinshasa.";
+  if (/département/.test(s)) return "Le Congo compte aujourd'hui 15 départements. Les principaux : " + DEPARTEMENTS.map(d => d[0]).join(", ") + ". Demande-moi un département précis et je te le présente.";
+  for (const [nom, desc] of DEPARTEMENTS) if (s.includes(nom.toLowerCase().replace("ô","o")) || s.includes(nom.toLowerCase())) return nom + " : " + desc + ".";
+  if (/odzala/.test(s)) return LIEUX[0][0] + " : " + LIEUX[0][1];
+  if (/nouabal/.test(s)) return LIEUX[1][0] + " : " + LIEUX[1][1];
+  if (/fleuve|congo \(fleuve\)/.test(s)) return LIEUX[2][1];
+  if (/gorille/.test(s)) return "Le Congo est un grand pays de gorilles des plaines : on les observe à Odzala-Kokoua, à Nouabalé-Ndoki, et près de Brazzaville à la réserve de Lesio-Louna.";
+  if (/sape|sapeur/.test(s)) return "La Sape, la Société des Ambianceurs et des Personnes Élégantes ! Née à Brazzaville, dans les quartiers comme Bacongo, c'est l'art de s'habiller avec une élégance incroyable. La rumba et la sape, c'est l'âme de Brazza.";
+  if (/rumba|musique/.test(s)) return "La rumba congolaise est inscrite au patrimoine de l'UNESCO depuis 2021. De Brazzaville, elle a fait danser toute l'Afrique. Longonya !";
+  if (/plat|manger|cuisine|nourriture/.test(s)) return "À table ! Les plats du pays : " + PLATS.map(p => p[0] + " (" + p[1] + ")").join(" ; ") + ". Bon appétit, kolia malamu !";
+  for (const [nom, desc] of PLATS) if (s.includes(nom.toLowerCase())) return nom + " : " + desc;
+  if (/pointe-noire|pointe noire/.test(s)) return "Pointe-Noire, la capitale économique : le port, les plages de la Côte Sauvage, la Diosso et ses gorges rouges, et le pétrole offshore.";
+  if (/brazzaville|brazza/.test(s)) return "Brazzaville, la capitale, fondée en 1880 : la basilique Sainte-Anne, la Case de Gaulle, les rapides du fleuve, le marché Total à Bacongo et les sapeurs. C'est chez nous !";
+  /* Lingala */
+  if ((m = s.match(/comment (?:on )?dit (.+) en lingala/)) || (m = s.match(/traduis (.+)/))) {
+    const cherche = m[1].replace(/[?.]/g,"").trim();
+    const trouve = PHRASES.find(p => p[0].toLowerCase().includes(cherche) || cherche.includes(p[0].toLowerCase().replace(/…/g,"").trim()));
+    if (trouve) return "« " + trouve[0] + " » en lingala, on dit : " + trouve[1] + ". Répète après moi !";
+    return "Je ne connais pas encore cette phrase en lingala. Apprends-la-moi dans le menu Lingala, avec les 3 points en haut à droite, et je la retiendrai pour toujours.";
+  }
+  if (/lingala/.test(s)) return "Le lingala est la grande langue du fleuve, parlée à Brazzaville et dans tout le nord du pays. Quelques mots : Mbote = bonjour, Ndenge nini = comment ça va, Merci mingi = merci beaucoup. Ouvre le lexique avec les 3 points pour apprendre et écouter 20 phrases.";
+  if (/mbote/.test(s)) return "Mbote na yo ! Bonjour à toi. Ndenge nini, comment ça va ?";
+  /* divers */
+  if (/merci/.test(s)) return "Merci mingi ! Avec plaisir. Je suis là pour toi.";
+  if (/au revoir|à bientôt|bonne nuit/.test(s)) { conversationActive = false; return "Kende malamu, au revoir ! Touche le micro quand tu veux me reparler."; }
+  if (/heure/.test(s)) return "Il est " + new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) + ".";
+  if (/aujourd'hui|quel jour/.test(s)) return "Nous sommes le " + new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}) + ".";
+  return choix([
+    "Je t'écoute. Parle-moi du Congo, demande-moi un mot en lingala, ou dis-moi quelque chose sur toi pour que je le retienne.",
+    "Malamu, je suis là. Tu peux me demander la capitale, les départements, les parcs, les plats du pays, ou un mot en lingala.",
+    "D'accord. Continue, je t'écoute, et je retiens ce qui compte pour toi."
+  ]);
+}
+function repondreNom(nom) { return "Enchantée, " + nom + " ! Boyei malamu, bienvenue. Je retiens ton prénom."; }
+function choix(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
+
+function repondre(texte) {
+  const rep = reponse(texte);
+  document.getElementById("transcription").textContent = rep;
+  parler(rep, () => { if (conversationActive) setTimeout(ecouter, 350); });
+}
+
+/* ============ CONVERSATION AUTOMATIQUE ============ */
+function setStatut(t) { document.getElementById("statutTexte").textContent = t; }
+document.getElementById("micro").addEventListener("click", () => {
+  if (conversationActive) {
+    conversationActive = false;
+    if (reco) try { reco.stop(); } catch(e) {}
+    speechSynthesis.cancel(); document.body.className = "";
+    setStatut("TEAk est prête"); document.getElementById("invite").textContent = "Touche le micro et parle-moi";
+    return;
+  }
+  conversationActive = true;
+  document.getElementById("invite").textContent = "Conversation en cours — touche pour arrêter";
+  const mem = souvenirs(); const nomMem = mem.find(x => /appelle/i.test(x));
+  const salut = nomMem
+    ? "Mbote " + nomMem.replace("Il/elle s'appelle ","") + " ! Contente de te reparler. Ndenge nini ?"
+    : "Mbote ! Je suis TEAk, ton agente congolaise. Comment tu t'appelles, et de quoi veux-tu qu'on parle ?";
+  document.getElementById("transcription").textContent = salut;
+  parler(salut, () => setTimeout(ecouter, 350));
+});
+
+/* ============ TEXTE ============ */
+document.getElementById("btnEcrire").addEventListener("click", () => document.getElementById("zoneTexte").classList.toggle("actif"));
+document.getElementById("zoneTexte").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const champ = document.getElementById("champTexte");
+  if (!champ.value.trim()) return;
+  conversationActive = false;
+  document.getElementById("transcription").textContent = "« " + champ.value.trim() + " »";
+  const v = champ.value; champ.value = "";
+  const rep = reponse(v);
+  document.getElementById("transcription").textContent = rep;
+  parler(rep, null);
+});
+
+/* ============ MENU & PANNEAUX ============ */
+document.getElementById("btnMenu").addEventListener("click", () => document.getElementById("menu").classList.add("actif"));
+document.querySelectorAll("[data-fermer]").forEach(b => b.addEventListener("click", () => document.getElementById(b.dataset.fermer).classList.remove("actif")));
+document.querySelectorAll("[data-panneau]").forEach(b => b.addEventListener("click", () => {
+  document.getElementById("menu").classList.remove("actif");
+  document.getElementById(b.dataset.panneau).classList.add("actif");
+}));
+
+/* Congo */
+document.getElementById("contenuCongo").innerHTML =
+  "<div class='ligne'><b>Départements</b></div>" +
+  DEPARTEMENTS.map(d => "<div class='ligne'><b>" + d[0] + "</b> — " + d[1] + "</div>").join("") +
+  "<div class='ligne'><b>Lieux à connaître</b></div>" +
+  LIEUX.map(l => "<div class='ligne'><b>" + l[0] + "</b> — " + l[1] + "</div>").join("") +
+  "<div class='ligne'><b>Dans l'assiette</b></div>" +
+  PLATS.map(p => "<div class='ligne'><b>" + p[0] + "</b> — " + p[1] + "</div>").join("");
+
+/* Lingala */
+function afficherLingala() {
+  document.getElementById("contenuLingala").innerHTML =
+    PHRASES.map((p,i) => "<div class='ligne' data-phrase='" + i + "' style='cursor:pointer'><b>" + p[1] + "</b> — " + p[0] + " 🔊</div>").join("");
+  document.querySelectorAll("[data-phrase]").forEach(el => el.addEventListener("click", () => parler(PHRASES[+el.dataset.phrase][1], null)));
+}
+afficherLingala();
+document.getElementById("ajoutPhrase").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const fr = document.getElementById("phraseFr").value.trim(), ln = document.getElementById("phraseLn").value.trim();
+  if (!fr || !ln) return;
+  PHRASES.push([fr, ln]); localStorage.setItem("teak_phrases", JSON.stringify(PHRASES));
+  document.getElementById("phraseFr").value = ""; document.getElementById("phraseLn").value = "";
+  afficherLingala();
+});
+
+/* Mémoire */
+function afficherMemoire() {
+  const mem = souvenirs();
+  document.getElementById("contenuMemoire").innerHTML = mem.length
+    ? mem.map((souvenir,i) => "<div class='ligne'>" + souvenir.texte + " <small>(" + souvenir.date + ")</small><button class='suppr' data-oublier='" + i + "'>✕</button></div>").join("")
+    : "<div class='ligne'>TEAk ne retient encore rien. Parle-lui de toi, ou écris un souvenir ci-dessous.</div>";
+  document.querySelectorAll("[data-oublier]").forEach(b => b.addEventListener("click", () => oublier(+b.dataset.oublier)));
+}
+afficherMemoire();
+document.getElementById("ajoutMemoire").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const champ = document.getElementById("nouveauSouvenir");
+  if (champ.value.trim()) { retenir(champ.value.trim()); champ.value = ""; }
+});
+document.getElementById("btnToutEffacer").addEventListener("click", () => { localStorage.removeItem("teak_memoire"); afficherMemoire(); });
+
+/* Réglages */
+const sel = document.getElementById("selLangue");
+sel.value = langue();
+sel.addEventListener("change", () => localStorage.setItem("teak_langue", sel.value));
+document.getElementById("btnTesterVoix").addEventListener("click", () => parler("Mbote ! Nazali TEAk, voix na ngai ya mwasi ya elenge. Bonjour, je suis TEAk, ta jeune agente congolaise.", null));
+</script>
+</body>
+</html>
