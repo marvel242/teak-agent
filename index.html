@@ -666,13 +666,13 @@ function reponse(t) {
   const mem = souvenirs().map(x => x.texte);
   const nomMem = mem.find(x => /appelle/i.test(x));
   let m;
-  if ((m = t.match(/je m'appelle\s+(.+)/i))) { retenir("Il/elle s'appelle " + m[1].trim()); return repondreNom(m[1].trim()); }
+  if (/mon nom|je m'appelle comment|comment je m[' ]?appelle/.test(s)) return nomMem ? "Bien sûr que je m'en souviens : " + nomMem.replace("Il/elle s'appelle ","tu t'appelles ") + "." : "Tu ne me l'as pas encore dit. Dis-moi : je m'appelle, et ton prénom, et je le retiendrai.";
+  if ((m = t.match(/je m[' ]?appelle\s+([a-zàâäéèêëîïôöùûüç][^.!?]*)/i))) { retenir("Il/elle s'appelle " + m[1].trim()); return repondreNom(m[1].trim()); }
   if ((m = t.match(/j'habite\s+(?:à|a|au|en)?\s*(.+)/i))) { retenir("Il/elle habite " + m[1].trim()); return "Malamu ! Je retiens que tu habites " + m[1].trim() + ". Je m'en souviendrai."; }
-  if ((m = t.match(/j'aime\s+(.+)/i))) { retenir("Il/elle aime " + m[1].trim()); return "Noté dans ma mémoire : tu aimes " + m[1].trim() + ". Merci de me l'avoir dit !"; }
+  if ((m = t.match(/j[' ]?aime\s+(.+)/i))) { retenir("Il/elle aime " + m[1].trim()); return "Noté dans ma mémoire : tu aimes " + m[1].trim() + ". Merci de me l'avoir dit !"; }
   if (/retiens|retient|n'oublie pas|souviens/.test(s)) { retenir(t); return "C'est noté dans ma mémoire, je ne l'oublierai pas."; }
-  if (/mon nom|je m'appelle comment|comment je m'appelle/.test(s)) return nomMem ? "Bien sûr que je m'en souviens : " + nomMem.replace("Il/elle s'appelle ","tu t'appelles ") + "." : "Tu ne me l'as pas encore dit. Dis-moi : je m'appelle, et ton prénom, et je le retiendrai.";
   if (/tu te souviens|souvenirs|ta mémoire|que sais-tu de moi/.test(s)) return mem.length ? "Voici ce que je retiens de toi : " + mem.join(" ; ") + "." : "Pour l'instant je ne sais encore rien de toi. Dis-moi ton prénom, ta ville, ce que tu aimes, et je le retiendrai.";
-  if (/^(mbote|bonjour|bonsoir|salut|hello)/.test(s)) return langue() === "fr" ? choixVar("salut", ["Bonjour ! Moi c'est Mayela, ton amie du Congo. On parle de quoi aujourd'hui : du pays, des nouvelles, du lingala ?", "Salut ! Contente de te voir. Tu veux qu'on discute de quoi : Brazzaville, les nouvelles du jour, ou autre chose ?", "Bonjour bonjour ! C'est Mayela. Raconte-moi, de quoi as-tu envie de parler ?"]) : "Mbote ! Nazali Mayela, moninga na yo ya Congo. Olengi tosolola na nini : mboka, nsango ya sika, lingala ?";
+  if (/^(mbote|bonjour|bonsoir|salut|hello)/.test(s)) return langue() === "fr" ? choixVar("salut", ["Bonjour ! Moi c'est Mayela, ton amie du Congo. On parle de quoi aujourd'hui : du pays, des nouvelles, du lingala ?", "Salut ! Contente de te voir. Tu veux qu'on discute de quoi : Brazzaville, les nouvelles du jour, ou autre chose ?", "Bonjour bonjour ! C'est Mayela. Raconte-moi, de quoi as-tu envie de parler ?"]) : choixVar("salut_ln", ["Mbote ! Nazali Mayela, moninga na yo ya Congo. Olengi tosolola na nini : mboka, nsango ya sika, lingala ?", "Mbote na yo ! Mayela azali awa. Tolingi tosolola na nini lelo : nsango ya mboka, to lingala ?", "Mbote ! Nazali Mayela, ya Brazzaville. Yebisa ngai, olengi toyeba nini ?"]);
   if (/ndenge nini|comment (ça va|vas-tu|allez)/.test(s)) return choixVar("cava", ["Nazali malamu, merci ! Je vais très bien. Et toi, ndenge nini, comment tu te sens aujourd'hui ?", "Je vais à merveille, merci de demander ! Et toi, ta journée se passe comment ?", "Malamu mingi ! Tout va bien pour moi. Et toi, quoi de neuf de ton côté ?"]);
   if (/qui es-tu|ton nom|tu t'appelles|présente/.test(s)) return choixVar("identite", ["Moi, c'est Mayela ! Une Congolaise de Brazzaville, née dans le numérique. Je parle français et lingala, je lis les nouvelles, je connais le pays, et je retiens ce que tu me confies. Et toi, comment tu t'appelles ?", "Je m'appelle Mayela. Pense à moi comme une amie de Brazzaville qui sait beaucoup de choses, qui écoute et qui pose des questions. Tu veux qu'on parle de quoi ?", "Mayela, c'est mon nom ! Je suis ton amie intelligente du Congo Brazzaville. Pose-moi des questions, raconte-moi tes journées, je suis là pour ça."]);
   if (/quel âge|ton âge/.test(s)) return "Je suis une intelligence artificielle, je n'ai pas d'âge, mais ma voix est celle d'une jeune femme, comme on m'a créée.";
@@ -753,23 +753,40 @@ function afficherImage(url, titre, sous) {
   window._carteTimer = setTimeout(masquerCarte, 25000);
 }
 function apresParole() { if (conversationActive) setTimeout(ecouter, 350); else { setExpr("explain"); setStatut("Mayela est prête"); } }
+const LIEN_FACEBOOK_CONGO = "https://www.facebook.com/share/1DbAaeAiSa/?mibextid=wwXIfr";
+const SOURCES_INFOS = {
+  congo: [
+    ["https://lesechos-congobrazza.com/?format=feed&type=rss", "Les Échos du Congo"],
+    ["https://www.adiac-congo.com/rss.xml", "Les Dépêches de Brazzaville"],
+    ["https://www.journaldebrazza.com/feed/", "Journal de Brazzaville"],
+    ["https://www.rfi.fr/fr/tag/congo-brazzaville/rss", "RFI Congo-Brazzaville"]
+  ],
+  monde: [
+    ["https://www.france24.com/fr/rss", "France 24"],
+    ["https://www.rfi.fr/fr/afrique/rss", "RFI Afrique"]
+  ]
+};
+let infosEnCours = null;
 async function actualites(s) {
   setExpr("search"); setStatut("Mayela lit les journaux…"); setEtatBouton("Mayela lit les nouvelles…");
   document.getElementById("transcription").textContent = "Je regarde les dernières nouvelles pour toi…";
-  const veutCongo = /brazzaville|congo|brazza|pays/.test(s);
-  const flux = veutCongo
-    ? [["https://www.adiac-congo.com/rss.xml", "Les Dépêches de Brazzaville"], ["https://www.rfi.fr/fr/afrique/rss", "RFI Afrique"]]
-    : [["https://www.france24.com/fr/rss", "France 24"], ["https://www.rfi.fr/fr/afrique/rss", "RFI Afrique"]];
-  let items = [];
-  for (const [u, nomSource] of flux) {
+  const veutCongo = /brazzaville|congo|brazza|pays|échos|echos/.test(s);
+  const flux = veutCongo ? SOURCES_INFOS.congo : SOURCES_INFOS.monde;
+  const resultats = await Promise.all(flux.map(async ([u, nomSource]) => {
     try {
-      const r = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(u) + "&count=6");
+      const r = await fetch("https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent(u) + "&count=5");
       const d = await r.json();
-      if (d.items) for (const it of d.items) items.push({ titre: nettoyerHtml(it.title), desc: nettoyerHtml(it.description), img: (it.enclosure && it.enclosure.link) || it.thumbnail || "", lien: it.link, source: nomSource });
-    } catch(e) {}
-    if (items.length >= 3) break;
+      return (d.items || []).map(it => ({ titre: nettoyerHtml(it.title), desc: nettoyerHtml(it.description), img: (it.enclosure && it.enclosure.link) || it.thumbnail || "", lien: it.link, source: nomSource }));
+    } catch(e) { return []; }
+  }));
+  const vus = new Set(); const pool = [];
+  const maxParSource = Math.max(0, ...resultats.map(l => l.length));
+  for (let rang = 0; rang < maxParSource; rang++) for (const liste of resultats) {
+    const it = liste[rang]; if (!it) continue;
+    const cle = it.titre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 50);
+    if (it.titre && !vus.has(cle)) { vus.add(cle); pool.push(it); }
   }
-  if (!items.length) {
+  if (!pool.length) {
     masquerSources();
     const sec = "Je n'arrive pas à joindre les journaux pour le moment, la connexion fait des siennes. Réessaie dans un instant, ou demande-moi autre chose.";
     document.getElementById("transcription").textContent = sec;
@@ -777,21 +794,78 @@ async function actualites(s) {
     parler(sec, apresParole);
     return;
   }
-  items = items.slice(0, 3);
+  infosEnCours = { pool: pool.slice(0, 9), proposees: [], premiere: true, veutCongo };
+  proposerInfos();
+}
+function proposerInfos() {
+  const items = infosEnCours.pool.slice(0, 3);
+  infosEnCours.proposees = items;
+  if (!items.length) {
+    infosEnCours = null; window._etapeInfos = null;
+    const sec = "C'est tout pour les nouvelles que j'ai trouvées aujourd'hui. On parle d'autre chose ?";
+    masquerSources();
+    document.getElementById("transcription").textContent = sec;
+    setExpr("happy");
+    parler(sec, apresParole);
+    return;
+  }
+  window._etapeInfos = "choix";
   if (items[0].img) afficherImage(items[0].img, "📰 " + items[0].source, items[0].titre);
-  afficherSources(items.map(it => [it.source, it.lien]));
-  let texte = choixVar("intro_infos", [
-    "Voici les nouvelles " + (veutCongo ? "du pays" : "du monde") + ", écoute bien. ",
-    "Je viens de lire les journaux pour toi, voilà ce qui se dit. ",
-    "Voilà ce qui se passe " + (veutCongo ? "chez nous au Congo" : "dans le monde") + " en ce moment. "
-  ]);
-  const numeros = ["Première info : ", "Ensuite : ", "Et aussi : "];
-  items.forEach((it, idx) => { texte += numeros[idx] + it.titre + ". " + (it.desc ? couperPhrase(it.desc, 280) + " " : ""); });
-  texte += choixVar("demande_avis", ["Et toi, qu'est-ce que tu penses de tout ça ? Donne-moi ton avis.", "Voilà pour les nouvelles. Dis-moi, tu en penses quoi, toi ?", "Et toi, ça te fait quoi d'entendre ça ? Je veux bien ton avis."]);
-  window._avisAttendu = true;
-  document.getElementById("transcription").innerHTML = items.map(it => "📰 " + it.titre).join("<br>");
+  afficherSources(items.map(it => [it.source, it.lien]).concat([["📘 Page Facebook du Congo", LIEN_FACEBOOK_CONGO]]));
+  document.getElementById("transcription").innerHTML = items.map((it, i) => (i + 1) + " 📰 " + it.titre).join("<br>");
+  let texte = infosEnCours.premiere
+    ? choixVar("intro_infos", ["Voici les nouvelles du jour, je t'en propose trois. ", "J'ai lu les journaux du pays pour toi, écoute ces trois infos. ", "Voilà trois nouvelles toutes fraîches. "])
+    : choixVar("intro_infos_suite", ["Voici la suite des nouvelles. ", "J'en ai encore pour toi, écoute. ", "Trois autres infos, si tu veux. "]);
+  const ordres = ["Un : ", "Deux : ", "Trois : "];
+  items.forEach((it, i) => { texte += ordres[i] + it.titre + ". "; });
+  texte += choixVar("choix_infos", ["Laquelle veux-tu que je te raconte ? Dis-moi le numéro : un, deux ou trois.", "Choisis-en une : dis un, deux ou trois, et je te la raconte en détail.", "Laquelle t'intéresse le plus ? Réponds par le numéro."]);
+  infosEnCours.premiere = false;
   setExpr("teacher");
   parler(texte, apresParole);
+}
+function choisirInfo(texte) {
+  const s = " " + texte.toLowerCase().replace(/[^a-zàâäéèêëîïôöùûüç0-9 ]/g, " ") + " ";
+  const n = infosEnCours.proposees.length;
+  if (/\b(1|un|premier|première|premiere)\b/.test(s)) return 0;
+  if (/\b(2|deux|deuxième|deuxieme)\b/.test(s)) return Math.min(1, n - 1);
+  if (/\b(3|trois|troisième|troisieme)\b/.test(s)) return Math.min(2, n - 1);
+  let meilleur = -1, scoreMax = 0;
+  infosEnCours.proposees.forEach((it, i) => {
+    const mots = it.titre.toLowerCase().split(/[^a-zàâäéèêëîïôöùûüç]+/).filter(m => m.length > 4);
+    let score = 0;
+    for (const m of mots) if (s.includes(" " + m)) score++;
+    if (score > scoreMax) { scoreMax = score; meilleur = i; }
+  });
+  return scoreMax >= 1 ? meilleur : -1;
+}
+function raconterInfo(idx) {
+  const it = infosEnCours.proposees[idx];
+  infosEnCours.pool = infosEnCours.pool.filter(x => x !== it);
+  window._etapeInfos = "suite";
+  if (it.img) afficherImage(it.img, "📰 " + it.source, it.titre);
+  afficherSources([[it.source, it.lien], ["📘 Page Facebook du Congo", LIEN_FACEBOOK_CONGO]]);
+  document.getElementById("transcription").textContent = it.titre + " — " + couperPhrase(it.desc || "", 600);
+  let texte = it.titre + ". " + (it.desc ? couperPhrase(it.desc, 600) + " " : "");
+  texte += choixVar("demande_suite", ["Tu en penses quoi ? Et dis-moi : je continue avec une autre info, ou on s'arrête là ?", "Voilà pour celle-là. Tu veux que je continue avec une autre nouvelle, ou ça suffit ?", "Qu'est-ce que tu en dis ? Je continue les nouvelles, ou on passe à autre chose ?"]);
+  setExpr("teacher");
+  parler(texte, apresParole);
+}
+function reponseSuiteInfos(texte) {
+  const s = texte.toLowerCase();
+  if (/\bnon\b|stop|arrête|arrete|ça suffit|ca suffit|suffit|pas la peine|autre chose|on s'arrête/.test(s)) {
+    infosEnCours = null; window._etapeInfos = null;
+    const repFin = choixVar("fin_infos", ["D'accord, on s'arrête là pour les nouvelles. De quoi veux-tu parler maintenant ?", "Très bien, je referme le journal. Autre chose ?", "Noté ! Les nouvelles, c'est fini pour le moment. Dis-moi ce qui te ferait plaisir."]);
+    masquerSources();
+    document.getElementById("transcription").textContent = repFin;
+    setExpr("happy");
+    parler(repFin, apresParole);
+    return;
+  }
+  if (/oui|continue|vas-y|vasy|encore|autre info|la suite|d'accord|ok|bien sûr|allez/.test(s)) { proposerInfos(); return; }
+  const repAvis = reponseAvis();
+  document.getElementById("transcription").textContent = repAvis;
+  setExpr("love");
+  parler(repAvis, apresParole);
 }
 function reponseAvis() {
   return choixVar("reac_avis", [
@@ -848,7 +922,21 @@ function sujetDepuis(s, defaut) {
 }
 
 function repondre(texte) {
+  texte = String(texte).replace(/\u2019/g, "'");
   const s = texte.toLowerCase();
+  if (window._etapeInfos === "choix" && infosEnCours) {
+    const idx = choisirInfo(texte);
+    if (idx >= 0 && infosEnCours.proposees[idx]) { raconterInfo(idx); return; }
+    if (!/[?]/.test(texte) && texte.trim().split(/\s+/).length <= 6) {
+      const rep2 = choixVar("rechoix", ["Je n'ai pas bien saisi. Dis-moi juste le numéro : un, deux ou trois.", "Pardon, je t'ai mal entendue : un, deux ou trois ?"]);
+      document.getElementById("transcription").textContent = rep2;
+      setExpr("skeptical");
+      parler(rep2, apresParole);
+      return;
+    }
+    window._etapeInfos = null; infosEnCours = null;
+  }
+  if (window._etapeInfos === "suite" && infosEnCours) { reponseSuiteInfos(texte); return; }
   if (window._avisAttendu) {
     window._avisAttendu = false;
     const repAvis = reponseAvis();
