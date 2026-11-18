@@ -181,7 +181,7 @@ async function synthetiser(texte, voix) {
   const gec = genererSecMsGec(Date.now() / 1000);
   const connId = crypto.randomUUID().replace(/-/g, "");
   const muid = crypto.randomUUID().replace(/-/g, "").toUpperCase();
-  const wss = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=" + TRUSTED_CLIENT_TOKEN + "&ConnectionId=" + connId + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=2-143.0.3650.75";
+  const wss = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=" + TRUSTED_CLIENT_TOKEN + "&ConnectionId=" + connId + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=2-143.0.3650.75";
   const resp = await fetch(wss, { headers: {
     "Upgrade": "websocket",
     "Origin": "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
