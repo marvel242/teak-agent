@@ -385,6 +385,10 @@ function modeVoix() { return localStorage.getItem("teak_voix") || "relai"; }
 const RELAIS_VOIX = "https://teak-voix.teakuniversalteakuniversal.workers.dev/";
 let urlObjetActuelle = null;
 let sessionParole = 0;
+function libererAudio() {
+  if (audioEl) { try { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); } catch(e) {} }
+  if (urlObjetActuelle) { try { URL.revokeObjectURL(urlObjetActuelle); } catch(e) {} urlObjetActuelle = null; }
+}
 function arreterParole() {
   sessionParole++;
   if (audioEl) { try { audioEl.pause(); audioEl.removeAttribute("src"); audioEl.load(); } catch(e) {} }
@@ -394,9 +398,9 @@ function arreterParole() {
 }
 function decouperTexte(t) {
   const morceaux = []; let reste = t;
-  while (reste.length > 180) {
-    let coupe = Math.max(reste.lastIndexOf(". ", 180), reste.lastIndexOf("! ", 180), reste.lastIndexOf("? ", 180), reste.lastIndexOf(", ", 180));
-    if (coupe < 60) coupe = 180;
+  while (reste.length > 140) {
+    let coupe = Math.max(reste.lastIndexOf(". ", 140), reste.lastIndexOf("! ", 140), reste.lastIndexOf("? ", 140), reste.lastIndexOf(", ", 140));
+    if (coupe < 45) coupe = 140;
     morceaux.push(reste.slice(0, coupe + 1).trim()); reste = reste.slice(coupe + 1).trim();
   }
   if (reste) morceaux.push(reste);
@@ -414,6 +418,7 @@ function parler(texte, suite) {
   const terminer = () => {
     if (!vivant()) return;
     fini = true; audioEnCours = null;
+    libererAudio();
     document.body.className = "";
     setEtatBouton(conversationActive ? "À toi de parler…" : "Touche pour parler");
     if (suite) suite();
@@ -588,35 +593,55 @@ const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
 let reco = null;
 let ecoutesSilencieuses = 0;
 let recoActif = false;
+let recoErreurs = 0;
+let recoWatchdog = null;
 function ecouter() {
   if (!conversationActive || recoActif) return;
   if (!Reco) { setStatut("Micro non pris en charge ici — écris plutôt"); document.getElementById("zoneTexte").classList.add("actif"); conversationActive = false; setExpr("explain"); return; }
+  libererAudio();
   reco = new Reco();
   reco.lang = "fr-FR"; reco.interimResults = true; reco.maxAlternatives = 1;
   document.body.className = "ecoute"; gererClignement(true); setStatut("Mayela t'écoute…"); setEtatBouton("À toi de parler…");
   setExpr("listening");
   document.getElementById("invite").textContent = "Je t'écoute… parle tranquillement, je ne suis pas pressée";
   let recu = false;
+  const armerWatchdog = () => {
+    clearTimeout(recoWatchdog);
+    recoWatchdog = setTimeout(() => {
+      /* Session micro « zombie » (fréquent sur iPhone après une réponse parlée) : on relance proprement */
+      if (!conversationActive || recu) return;
+      try { reco.abort(); } catch(e) {}
+      recoActif = false;
+      setTimeout(() => { if (conversationActive) ecouter(); }, 300);
+    }, 12000);
+  };
+  armerWatchdog();
+  reco.onstart = () => { recoErreurs = 0; };
   reco.onresult = (e) => {
     let interim = "", final = "";
     for (const r of e.results) { if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript; }
-    if (interim && !final) document.getElementById("transcription").textContent = "🎙️ " + interim + " …";
+    if (interim && !final) { armerWatchdog(); document.getElementById("transcription").textContent = "🎙️ " + interim + " …"; }
     if (final) {
-      recu = true; ecoutesSilencieuses = 0;
+      recu = true; ecoutesSilencieuses = 0; recoErreurs = 0;
+      clearTimeout(recoWatchdog);
       const texte = final.trim();
       document.getElementById("transcription").textContent = "« " + texte + " »";
       document.body.className = "";
       setExpr(/s'il te pla|je t'en prie|stp/.test(texte.toLowerCase()) ? "pray" : "thinking");
       setEtatBouton("Mayela réfléchit…");
       try { reco.stop(); } catch(err) {}
-      setTimeout(() => repondre(texte), 450);
+      setTimeout(() => repondre(texte), 150);
     }
   };
   reco.onerror = (e) => {
-    recoActif = false;
-    if (e && (e.error === "not-allowed" || e.error === "service-not-allowed")) {
+    recoActif = false; clearTimeout(recoWatchdog);
+    recoErreurs++;
+    const erreur = e && e.error ? e.error : "";
+    if ((erreur === "not-allowed" || erreur === "service-not-allowed" || erreur === "audio-capture") && recoErreurs >= 3) {
       conversationActive = false; document.body.className = "";
-      setStatut("Micro refusé — autorise le micro, ou écris ton message");
+      setStatut("Le micro a un souci — touche le bouton pour réessayer, ou écris ton message");
+      setEtatBouton("Touche pour parler");
+      document.getElementById("invite").textContent = "Touche le bouton et parle-moi";
       document.getElementById("zoneTexte").classList.add("actif"); setExpr("explain");
       return;
     }
@@ -624,7 +649,7 @@ function ecouter() {
     if (conversationActive && !recu) setTimeout(ecouter, 900);
   };
   reco.onend = () => {
-    recoActif = false;
+    recoActif = false; clearTimeout(recoWatchdog);
     if (!conversationActive || recu) { if (document.body.className === "ecoute") document.body.className = ""; return; }
     ecoutesSilencieuses++;
     if (ecoutesSilencieuses <= 5) setTimeout(() => { if (conversationActive) ecouter(); }, 250);
@@ -853,12 +878,13 @@ function repondre(texte) {
 function demarrerConversation() {
   if (conversationActive) return;
   primerAudio();
+  if (modeVoix() === "relai") { try { fetch(RELAIS_VOIX).catch(() => {}); } catch(e) {} }
   conversationActive = true;
   document.getElementById("invite").textContent = "Conversation en cours — touche le bouton pour arrêter";
   if (sessionStorage.getItem("mayela_accueil")) {
     const reprise = choixVar("reprise", ["Je t'écoute, on continue !", "Te revoilà ! Dis-moi tout, je t'écoute.", "On reprend ! Je suis toute ouïe.", "Oui ? Je t'écoute, parle-moi."]);
     document.getElementById("transcription").textContent = reprise;
-    setExpr("listening");
+    setExpr("happy");
     parler(reprise, () => setTimeout(ecouter, 300));
     return;
   }
