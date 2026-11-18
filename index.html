@@ -43,7 +43,7 @@
   /* ===== PERSONNAGE 3D ANIMÉ ===== */
   #scene { display:flex; flex-direction:column; align-items:center; }
   #persoWrap {
-    position:relative; width:min(56vw,228px); aspect-ratio: 242 / 324;
+    position:relative; width:min(46vw,185px); aspect-ratio: 242 / 324;
     animation: respire 3.6s ease-in-out infinite;
     transform-origin: 50% 85%;
   }
@@ -70,11 +70,11 @@
     display:none;
   }
   #persoWrap.expr-listening .paupiere { display:block; }
-  body.ecoute #persoWrap.expr-listening .paupiere { animation: cligne 3.8s ease-in-out infinite; }
+  body.ecoute #persoWrap.expr-listening .paupiere { animation: none; }
   @keyframes cligne { 0%, 87%, 100% { transform: scaleY(0); } 90.5% { transform: scaleY(1); } 93% { transform: scaleY(0); } 95.5% { transform: scaleY(1); } 98% { transform: scaleY(0); } }
-  #paupG { left:48.4%; top:32.5%; width:19%; height:15%; }
-  #paupD { left:69.3%; top:29%; width:19%; height:15%; }
-  #ombre { width:112px; height:20px; margin-top:2px; border-radius:50%; background:rgba(0,0,0,.35); filter: blur(8px); animation: ombre 3.6s ease-in-out infinite; }
+  #paupG { left:48.4%; top:32%; width:19%; height:16%; }
+  #paupD { left:69.3%; top:28.5%; width:19%; height:16%; }
+  #ombre { width:94px; height:20px; margin-top:2px; border-radius:50%; background:rgba(0,0,0,.35); filter: blur(8px); animation: ombre 3.6s ease-in-out infinite; }
   @keyframes ombre { 0%,100% { transform: scaleX(1); opacity:.8; } 50% { transform: scaleX(.85); opacity:.55; } }
 
   /* ===== CARTE INFO : montre 3D (heure) / calendrier 3D (date) ===== */
@@ -365,8 +365,22 @@ let conversationActive = false;
 function setStatut(t) { document.getElementById("statutTexte").textContent = t; }
 function setEtatBouton(t) { document.getElementById("etatBouton").textContent = t; }
 let audioEnCours = null;
+let audioEl = null;
+function obtenirAudio() {
+  if (!audioEl) { audioEl = new Audio(); audioEl.preload = "auto"; audioEl.setAttribute("playsinline", ""); }
+  return audioEl;
+}
+function primerAudio() {
+  const a = obtenirAudio();
+  try {
+    a.src = "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+    const pr = a.play(); if (pr && pr.catch) pr.catch(() => {});
+  } catch(e) {}
+  if ("speechSynthesis" in window) { try { speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch(e) {} }
+}
 function modeVoix() { return localStorage.getItem("teak_voix") || "google"; }
 function arreterParole() {
+  if (audioEl) { try { audioEl.pause(); } catch(e) {} }
   if (audioEnCours) { try { audioEnCours.pause(); } catch(e) {} audioEnCours = null; }
   if ("speechSynthesis" in window) speechSynthesis.cancel();
 }
@@ -382,7 +396,9 @@ function decouperTexte(t) {
 }
 function parler(texte, suite) {
   document.body.className = "parle";
+  gererClignement(false);
   setStatut("TEAk parle…"); setEtatBouton("TEAk parle…");
+  document.getElementById("invite").textContent = "TEAk te répond…";
   arreterParole();
   let fini = false;
   const terminer = () => { if (fini) return; fini = true; audioEnCours = null; document.body.className = ""; setEtatBouton(conversationActive ? "À toi de parler…" : "Touche pour parler"); if (suite) suite(); };
@@ -393,7 +409,8 @@ function parler(texte, suite) {
     const jouer = () => {
       if (fini) return;
       if (i >= morceaux.length) { terminer(); return; }
-      const a = new Audio("https://translate.google.com/translate_tts?ie=UTF-8&tl=fr&client=tw-ob&q=" + encodeURIComponent(morceaux[i]));
+      const a = obtenirAudio();
+      a.src = "https://translate.google.com/translate_tts?ie=UTF-8&tl=fr&client=tw-ob&q=" + encodeURIComponent(morceaux[i]);
       audioEnCours = a;
       a.onended = () => { i++; jouer(); };
       a.onerror = () => { if (!fini) parlerAppareil(texte, terminer); };
@@ -489,6 +506,27 @@ async function chercherWeb(texte) {
   parler(rep, apres);
 }
 
+/* ============ CLIGNEMENT DES YEUX (moteur JS) ============ */
+let cligneTimer = null;
+function gererClignement(actif) {
+  if (actif && !cligneTimer) {
+    const boucle = () => {
+      if (document.body.className === "ecoute") {
+        for (const id of ["paupG", "paupD"]) {
+          const el = document.getElementById(id);
+          if (el) el.animate(
+            [{ transform: "scaleY(0)" }, { transform: "scaleY(1)", offset: 0.45 }, { transform: "scaleY(0)" }],
+            { duration: 320, easing: "ease-in-out" });
+        }
+      }
+      cligneTimer = setTimeout(boucle, 1900 + Math.random() * 1800);
+    };
+    boucle();
+  } else if (!actif && cligneTimer) {
+    clearTimeout(cligneTimer); cligneTimer = null;
+  }
+}
+
 /* ============ ÉCOUTE ============ */
 const Reco = window.SpeechRecognition || window.webkitSpeechRecognition;
 let reco = null;
@@ -497,7 +535,7 @@ function ecouter() {
   if (!Reco) { setStatut("Micro non pris en charge ici — écris plutôt"); document.getElementById("zoneTexte").classList.add("actif"); conversationActive = false; setExpr("explain"); return; }
   reco = new Reco();
   reco.lang = "fr-FR"; reco.interimResults = false; reco.maxAlternatives = 1;
-  document.body.className = "ecoute"; setStatut("TEAk t'écoute…"); setEtatBouton("À toi de parler…");
+  document.body.className = "ecoute"; gererClignement(true); setStatut("TEAk t'écoute…"); setEtatBouton("À toi de parler…");
   setExpr("listening");
   document.getElementById("invite").textContent = "Je t'écoute…";
   reco.onresult = (e) => {
@@ -579,16 +617,9 @@ function repondre(texte) {
 }
 
 /* ============ CONVERSATION AUTOMATIQUE (petit bouton) ============ */
-document.getElementById("btnParole").addEventListener("click", () => {
-  if (conversationActive) {
-    conversationActive = false;
-    if (reco) try { reco.stop(); } catch(e) {}
-    arreterParole(); document.body.className = "";
-    setExpr("explain");
-    setStatut("TEAk est prête"); setEtatBouton("Touche pour parler");
-    document.getElementById("invite").textContent = "Touche le bouton et parle-moi";
-    return;
-  }
+function demarrerConversation() {
+  if (conversationActive) return;
+  primerAudio();
   conversationActive = true;
   document.getElementById("invite").textContent = "Conversation en cours — touche le bouton pour arrêter";
   const mem = souvenirs(); const nomMem = mem.find(x => /appelle/i.test(x));
@@ -598,6 +629,31 @@ document.getElementById("btnParole").addEventListener("click", () => {
   document.getElementById("transcription").textContent = salut;
   setExpr("happy");
   parler(salut, () => setTimeout(ecouter, 350));
+}
+document.getElementById("btnParole").addEventListener("click", () => {
+  if (conversationActive) {
+    conversationActive = false;
+    if (reco) try { reco.stop(); } catch(e) {}
+    arreterParole(); document.body.className = "";
+    gererClignement(false);
+    setExpr("explain");
+    setStatut("TEAk est prête"); setEtatBouton("Touche pour parler");
+    document.getElementById("invite").textContent = "Touche le bouton et parle-moi";
+    return;
+  }
+  demarrerConversation();
+});
+/* Démarrage automatique : TEAk parle dès l'arrivée sur la plateforme.
+   Les navigateurs exigent un premier toucher avant le son : le tout premier
+   toucher n'importe où sur l'écran lance donc la conversation. */
+window.addEventListener("load", () => {
+  document.getElementById("invite").textContent = "Touche l'écran : TEAk te parle tout de suite";
+  if (navigator.userActivation && navigator.userActivation.hasBeenActive) demarrerConversation();
+});
+document.addEventListener("pointerdown", (e) => {
+  if (conversationActive) return;
+  if (e.target.closest("button, a, select, input, .panneau, #menu")) return;
+  demarrerConversation();
 });
 
 /* ============ TEXTE ============ */
