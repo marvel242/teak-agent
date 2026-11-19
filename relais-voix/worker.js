@@ -159,6 +159,11 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
     const url = new URL(request.url);
     const chemin = url.pathname.replace(/\/+$/, "") || "/";
+    if (chemin === "/transcription" || chemin === "/conversation" || chemin === "/voix" || chemin === "/infos" || chemin === "/") {
+      if (origineRefusee(request)) return jsonRep({ erreur: "origine non autorisée" }, 403, cors);
+    }
+    if ((chemin === "/transcription" || chemin === "/conversation") && tropDeDemandes(request, chemin, 30)) return jsonRep({ erreur: "trop de demandes, réessaie dans une minute" }, 429, cors);
+    if ((chemin === "/voix" || chemin === "/") && tropDeDemandes(request, "/voix", 90)) return jsonRep({ erreur: "trop de demandes, réessaie dans une minute" }, 429, cors);
     try {
       if (chemin === "/transcription" && request.method === "POST") return await routeTranscription(request, env, cors);
       if (chemin === "/conversation" && request.method === "POST") return await routeConversation(request, env, cors);
@@ -182,6 +187,23 @@ export default {
   }
 };
 
+const ORIGINES_OK = ["https://teak-agent.pages.dev"];
+function origineRefusee(request) {
+  const o = request.headers.get("Origin");
+  return !!(o && !ORIGINES_OK.includes(o));
+}
+const compteursDemandes = new Map();
+function tropDeDemandes(request, route, maxParMinute) {
+  const ip = request.headers.get("CF-Connecting-IP") || "inconnue";
+  const cle = route + "|" + ip;
+  const maintenant = Date.now();
+  let entree = compteursDemandes.get(cle);
+  if (!entree || maintenant - entree.debut > 60000) { entree = { debut: maintenant, n: 0 }; compteursDemandes.set(cle, entree); }
+  entree.n++;
+  if (compteursDemandes.size > 500) compteursDemandes.clear();
+  return entree.n > maxParMinute;
+}
+function estErreurQuota(e) { return /neuron|quota|exceeded|3036|4006/i.test(String((e && e.message) || e)); }
 function jsonRep(objet, statut, cors) {
   return new Response(JSON.stringify(objet), { status: statut, headers: { ...cors, "Content-Type": "application/json" } });
 }
@@ -198,7 +220,10 @@ async function routeTranscription(request, env, cors) {
     try { res = await env.AI.run(modele, { audio: octets }); break; }
     catch (e) { derniereErreur = e; res = null; }
   }
-  if (!res) return jsonRep({ erreur: "transcription impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur) }, 502, cors);
+  if (!res) {
+    if (estErreurQuota(derniereErreur)) return jsonRep({ erreur: "quota", message: "Le service de transcription se repose : le quota gratuit du jour est atteint." }, 429, cors);
+    return jsonRep({ erreur: "transcription impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur) }, 502, cors);
+  }
   const texte = (res && (res.text || (res.result && res.result.text))) || "";
   return jsonRep({ texte: String(texte).trim() }, 200, cors);
 }
@@ -216,12 +241,26 @@ async function routeConversation(request, env, cors) {
   if (souvenirs.length) systeme += " Ce que tu sais de la personne : " + souvenirs.join(" ; ") + ".";
   const messages = [{ role: "system", content: systeme }, ...historique, { role: "user", content: message }];
   const options = { messages, max_tokens: 230, temperature: 0.7 };
+  if (j.stream === true) {
+    let erreurFlux = null;
+    for (const modele of ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"]) {
+      try {
+        const fluxRes = await env.AI.run(modele, { ...options, stream: true });
+        return new Response(fluxRes, { headers: { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-store" } });
+      } catch (e) { erreurFlux = e; }
+    }
+    if (estErreurQuota(erreurFlux)) return jsonRep({ erreur: "quota", message: "Mayela se repose : le quota gratuit du jour est atteint." }, 429, cors);
+    return jsonRep({ erreur: "flux impossible : " + String((erreurFlux && erreurFlux.message) || erreurFlux) }, 502, cors);
+  }
   let res = null, derniereErreur = null;
   for (const modele of ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/meta/llama-3.1-8b-instruct"]) {
     try { res = await env.AI.run(modele, options); break; }
     catch (e) { derniereErreur = e; res = null; }
   }
-  if (!res || !res.response) return jsonRep({ erreur: "conversation impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur || "réponse vide") }, 502, cors);
+  if (!res || !res.response) {
+    if (estErreurQuota(derniereErreur)) return jsonRep({ erreur: "quota", message: "Mayela se repose : le quota gratuit du jour est atteint." }, 429, cors);
+    return jsonRep({ erreur: "conversation impossible : " + String((derniereErreur && derniereErreur.message) || derniereErreur || "réponse vide") }, 502, cors);
+  }
   const rep = String(res.response).replace(/[*_#>`]/g, "").replace(/\s+/g, " ").trim().slice(0, 700);
   if (!rep) return jsonRep({ erreur: "réponse vide" }, 502, cors);
   return jsonRep({ reponse: rep }, 200, cors);

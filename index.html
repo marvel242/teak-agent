@@ -1077,16 +1077,33 @@ function repondre(texte) {
 }
 
 let historiqueConv = [];
+function retenirEchange(texte, rep) {
+  historiqueConv.push({ role: "user", content: texte }, { role: "assistant", content: rep });
+  if (historiqueConv.length > 12) historiqueConv = historiqueConv.slice(-12);
+}
+function messageRepos() {
+  const rep = "Mon petit cerveau distant se repose un moment, il a beaucoup travaillé aujourd'hui. Mais je suis toujours là ! Demande-moi les nouvelles du pays, des choses sur le Congo, ou réessaie dans un moment.";
+  masquerSources();
+  document.getElementById("transcription").textContent = rep;
+  setExpr("sad");
+  parler(rep, apresParole);
+}
 async function demanderLLM(texte, repliTexte) {
   setExpr("thinking"); setStatut("Mayela réfléchit…"); setEtatBouton("Mayela réfléchit…");
+  const corps = { message: texte, souvenirs: souvenirs().map(x => x.texte), historique: historiqueConv.slice(-6) };
   try {
-    const r = await fetch(RELAIS_VOIX + "conversation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: texte, souvenirs: souvenirs().map(x => x.texte), historique: historiqueConv.slice(-6) }) });
+    const r = await fetch(RELAIS_VOIX + "conversation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...corps, stream: true }) });
+    if (r.status === 429) {
+      const d = await r.json().catch(() => ({}));
+      if (d.erreur === "quota") { messageRepos(); return; }
+      throw new Error("trop de demandes");
+    }
     if (!r.ok) throw new Error("conversation " + r.status);
+    if (r.body && typeof r.body.getReader === "function") { await parlerFlux(r, texte); return; }
     const d = await r.json();
     const rep = String(d.reponse || "").trim();
     if (!rep) throw new Error("réponse vide");
-    historiqueConv.push({ role: "user", content: texte }, { role: "assistant", content: rep });
-    if (historiqueConv.length > 12) historiqueConv = historiqueConv.slice(-12);
+    retenirEchange(texte, rep);
     masquerSources();
     document.getElementById("transcription").textContent = rep;
     setExpr(emotionPour(rep, texte));
@@ -1097,6 +1114,72 @@ async function demanderLLM(texte, repliTexte) {
     setExpr(emotionPour(repliTexte, texte));
     parler(repliTexte, apresParole);
   }
+}
+async function parlerFlux(reponseHttp, texteUtilisateur) {
+  arreterParole();
+  const maSession = sessionParole;
+  const vivant = () => maSession === sessionParole;
+  document.body.className = "parle"; gererClignement(false);
+  setStatut("Mayela parle…"); setEtatBouton("Mayela parle…");
+  document.getElementById("invite").textContent = "Mayela te répond…";
+  const file = [];
+  let fluxFini = false, enLecture = false, texteComplet = "", jetonLecture = 0;
+  const lecteur = reponseHttp.body.getReader();
+  const decodeur = new TextDecoder();
+  let tamponLignes = "", tamponPhrase = "";
+  const terminerFlux = () => {
+    if (!vivant()) return;
+    retenirEchange(texteUtilisateur, texteComplet.trim());
+    document.body.className = "";
+    if (conversationActive) setTimeout(ecouter, 350);
+    else { setExpr("explain"); setStatut("Mayela est prête"); setEtatBouton("Touche pour parler"); }
+  };
+  const pomper = () => {
+    if (!vivant() || enLecture) return;
+    const phrase = file.shift();
+    if (!phrase) { if (fluxFini) terminerFlux(); return; }
+    enLecture = true;
+    const monJeton = ++jetonLecture;
+    setTimeout(() => { if (vivant() && enLecture && monJeton === jetonLecture) { enLecture = false; pomper(); } }, 25000);
+    const suite = () => { if (monJeton === jetonLecture) { enLecture = false; pomper(); } };
+    const mv = modeVoix();
+    if (mv === "relai") jouerRelai(phrase, vivant, suite);
+    else if (mv === "google") jouerGoogle(phrase, vivant, suite);
+    else parlerAppareil(phrase, vivant, suite);
+  };
+  const pousserTexte = (morceau) => {
+    texteComplet += morceau;
+    document.getElementById("transcription").textContent = texteComplet;
+    tamponPhrase += morceau;
+    let m;
+    while ((m = tamponPhrase.match(/^[\s\S]*?[.!?…]+["»']?\s+/)) && m[0].trim().length >= 8) {
+      file.push(m[0].trim());
+      tamponPhrase = tamponPhrase.slice(m[0].length);
+    }
+    pomper();
+  };
+  try {
+    for (;;) {
+      const morceauLu = await lecteur.read();
+      if (!vivant()) { try { lecteur.cancel(); } catch(e) {} return; }
+      if (morceauLu.done) break;
+      tamponLignes += decodeur.decode(morceauLu.value, { stream: true });
+      const lignes = tamponLignes.split("\n");
+      tamponLignes = lignes.pop();
+      for (const ligne of lignes) {
+        const l = ligne.trim();
+        if (!l.startsWith("data:")) continue;
+        const charge = l.slice(5).trim();
+        if (charge === "[DONE]") continue;
+        try { const j = JSON.parse(charge); if (j.response) pousserTexte(j.response); } catch(e) {}
+      }
+    }
+  } catch(e) {}
+  if (!vivant()) return;
+  if (tamponPhrase.trim()) file.push(tamponPhrase.trim());
+  fluxFini = true;
+  if (!texteComplet.trim()) throw new Error("flux vide");
+  pomper();
 }
 
 /* ============ CONVERSATION AUTOMATIQUE (petit bouton) ============ */
@@ -1119,7 +1202,8 @@ function demarrerConversation() {
   const salut = nomMem
     ? choixVar("accueil_connu", ["Mbote " + prenom + " ! Contente de te reparler. Ndenge nini ? On discute de quoi : les nouvelles, le pays, le lingala ?", "Ah, " + prenom + ", te revoilà ! Ça me fait plaisir. Raconte-moi ta journée, ou demande-moi les nouvelles de Brazzaville.", "Mbote " + prenom + " ! Je t'attendais. De quoi veux-tu parler aujourd'hui ?"])
     : choixVar("accueil", ["Mbote ! Moi c'est Mayela, ton amie congolaise. Comment tu t'appelles, et de quoi veux-tu qu'on parle ?", "Bonjour et bienvenue chez moi ! Je suis Mayela, de Brazzaville. Dis-moi ton prénom, et raconte-moi ce qui t'amène.", "Mbote na yo ! C'est Mayela. Je peux te raconter les nouvelles, te montrer des images, te parler du Congo… mais d'abord, comment tu t'appelles ?"]);
-  document.getElementById("transcription").textContent = salut;
+  document.getElementById("transcription").textContent = sessionStorage.getItem("mayela_note_micro") ? salut : salut + " (Pendant notre conversation, le point orange en haut de l'écran indique que mon micro est ouvert ; il se ferme dès que tu arrêtes la conversation.)";
+  sessionStorage.setItem("mayela_note_micro", "1");
   setExpr("happy");
   parler(salut, () => setTimeout(ecouter, 350));
 }
@@ -1150,6 +1234,7 @@ document.addEventListener("pointerdown", (e) => {
   if (e.target.closest("button, a, select, input, .panneau, #menu")) return;
   demarrerConversation();
 });
+window.addEventListener("pagehide", () => { fermerMicro(); });
 
 /* ============ TEXTE ============ */
 document.getElementById("btnEcrire").addEventListener("click", () => document.getElementById("zoneTexte").classList.toggle("actif"));
