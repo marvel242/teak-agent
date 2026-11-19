@@ -369,6 +369,7 @@ function chronoMarque(nom) {
   chronoAfficher();
 }
 function chronoAfficher() {
+  return; /* Panneau retiré de l'écran à la demande de Marvel ; les mesures restent en console */
   if (!CHRONO_ACTIF) return;
   const el = document.getElementById("chrono");
   if (!el) return;
@@ -804,22 +805,33 @@ async function ecouterMicro(ptt) {
 async function transcrire(blob) {
   document.body.className = "";
   setStatut("Mayela réfléchit…"); setEtatBouton("Mayela réfléchit…");
-  try {
-    const r = await fetch(RELAIS_VOIX + "transcription", { method: "POST", headers: { "Content-Type": blob.type || "audio/mp4" }, body: blob });
-    if (!r.ok) throw new Error("transcription " + r.status);
-    const d = await r.json();
-    const texte = String(d.texte || "").trim();
-    if (!texte) { cycleSilencieux(); return; }
-    erreursTranscription = 0; ecoutesSilencieuses = 0;
-    chronoMarque("transcription");
-    document.getElementById("transcription").textContent = "Tu as dit : « " + texte + " »";
-    setExpr("thinking");
-    setTimeout(() => repondre(texte), 150);
-  } catch(e) {
-    erreursTranscription++;
-    if (erreursTranscription >= 2) { modeEcoute = "sr"; erreursTranscription = 0; if (conversationActive) { setStatut("Je passe sur l'autre micro…"); setTimeout(ecouter, 300); } return; }
-    cycleSilencieux();
+  document.getElementById("invite").textContent = "J'ai bien reçu ta voix, je réfléchis…";
+  const minuteurLent = setTimeout(() => setStatut("Mayela réfléchit… le réseau est lent, patience"), 7000);
+  for (let essai = 0; essai < 2; essai++) {
+    try {
+      const controleur = new AbortController();
+      const minuteur = setTimeout(() => controleur.abort(), 25000);
+      const r = await fetch(RELAIS_VOIX + "transcription", { method: "POST", headers: { "Content-Type": blob.type || "audio/mp4" }, body: blob, signal: controleur.signal });
+      clearTimeout(minuteur);
+      if (!r.ok) throw new Error("transcription " + r.status);
+      const d = await r.json();
+      clearTimeout(minuteurLent);
+      const texte = String(d.texte || "").trim();
+      if (!texte) { cycleSilencieux(); return; }
+      erreursTranscription = 0; ecoutesSilencieuses = 0;
+      chronoMarque("transcription");
+      document.getElementById("transcription").textContent = "Tu as dit : « " + texte + " »";
+      setExpr("thinking");
+      setTimeout(() => repondre(texte), 150);
+      return;
+    } catch(e) { /* un nouvel essai : le service de transcription est parfois très lent */ }
   }
+  clearTimeout(minuteurLent);
+  erreursTranscription++;
+  if (erreursTranscription >= 2) { modeEcoute = "sr"; erreursTranscription = 0; if (conversationActive) { setStatut("Je passe sur l'autre micro…"); setTimeout(ecouter, 300); } return; }
+  setStatut("Je n'ai pas réussi à entendre — réessaie");
+  document.getElementById("invite").textContent = "Le réseau a traîné. Réessaie, je t'écoute.";
+  if (modeEcouteChoisi() === "appuyer" && modeEcoute !== "sr") setTimeout(pretePourAppui, 1000); else cycleSilencieux();
 }
 
 function ecouterSR() {
