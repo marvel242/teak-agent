@@ -28,7 +28,7 @@
       radial-gradient(ellipse 45% 30% at 85% 20%, rgba(120,80,255,.22), transparent 70%);
     pointer-events:none;
   }
-  #app { position:relative; height:100dvh; display:flex; flex-direction:column; align-items:center; }
+  #app { position:relative; height:100dvh; display:flex; flex-direction:column; align-items:center; padding-bottom:88px; box-sizing:border-box; }
   header { width:100%; display:flex; justify-content:space-between; align-items:center; padding:14px 16px; z-index:5; }
   #statut { font-size:13px; opacity:.9; display:flex; align-items:center; gap:7px; }
   #statut .dot { width:9px; height:9px; border-radius:50%; background:#e8e8e8; box-shadow:0 0 8px rgba(255,255,255,.7); transition:background .3s, box-shadow .3s; }
@@ -188,7 +188,7 @@
       </div>
       <div id="ombre"></div>
     </div>
-    <div id="invite">Touche le bouton et parle-moi</div>
+    <div id="invite">Écris-moi ci-dessous — je te réponds à voix haute</div>
     <div id="transcription"></div>
     <div id="sources"></div>
     <div id="chrono"></div>
@@ -203,8 +203,8 @@
       <div id="carteTitre"></div>
       <div id="carteSous"></div>
     </div>
-    <button id="btnEcrire">Écrire plutôt</button>
-    <form id="zoneTexte">
+    <button id="btnEcrire" style="display:none">Écrire plutôt</button>
+    <form id="zoneTexte" class="actif">
       <input id="champTexte" type="text" placeholder="Écris ton message à Mayela…" autocomplete="off">
       <button id="btnEnvoyer" type="submit">Envoyer</button>
     </form>
@@ -882,7 +882,7 @@ function ecouterSR() {
       conversationActive = false; document.body.className = "";
       setStatut("Le micro a un souci — touche le bouton pour réessayer, ou écris ton message");
       setEtatBouton("Touche pour parler");
-      document.getElementById("invite").textContent = "Touche le bouton et parle-moi";
+      document.getElementById("invite").textContent = "Écris-moi ci-dessous — je te réponds à voix haute";
       document.getElementById("zoneTexte").classList.add("actif"); setExpr("explain");
       return;
     }
@@ -1339,6 +1339,8 @@ async function parlerFlux(reponseHttp, texteUtilisateur) {
 function demarrerConversation() {
   if (conversationActive) return;
   primerAudio();
+  document.getElementById("zoneTexte").classList.remove("actif");
+  document.getElementById("btnEcrire").style.display = "";
   if (navigator.audioSession) { try { navigator.audioSession.type = "play-and-record"; } catch(e) {} }
   if (modeEcoute !== "sr" && navigator.mediaDevices && window.MediaRecorder) { ouvrirMicro().catch(() => { modeEcoute = "sr"; }); }
   if (modeVoix() === "relai") { try { fetch(RELAIS_VOIX).catch(() => {}); } catch(e) {} }
@@ -1373,7 +1375,9 @@ document.getElementById("btnParole").addEventListener("click", () => {
     gererClignement(false);
     setExpr("explain");
     setStatut("Mayela est prête"); setEtatBouton("Touche pour parler");
-    document.getElementById("invite").textContent = "Touche le bouton et parle-moi";
+    document.getElementById("invite").textContent = "Écris-moi ci-dessous — je te réponds à voix haute";
+    document.getElementById("zoneTexte").classList.add("actif");
+    document.getElementById("btnEcrire").style.display = "none";
     return;
   }
   demarrerConversation();
@@ -1410,22 +1414,26 @@ btnP.addEventListener("selectstart", e => e.preventDefault());
    Les navigateurs exigent un premier toucher avant le son : le tout premier
    toucher n'importe où sur l'écran lance donc la conversation. */
 window.addEventListener("load", () => {
-  document.getElementById("invite").textContent = "Touche l'écran : Mayela te parle tout de suite";
-  if (navigator.userActivation && navigator.userActivation.hasBeenActive) demarrerConversation();
+  document.getElementById("invite").textContent = "Écris-moi ci-dessous — je te réponds à voix haute";
 });
-document.addEventListener("pointerdown", (e) => {
-  if (conversationActive) return;
-  if (e.target.closest("button, a, select, input, .panneau, #menu")) return;
-  demarrerConversation();
-});
+/* La conversation vocale ne démarre plus toute seule : uniquement par le gros bouton. */
 window.addEventListener("pagehide", () => { fermerMicro(); });
 
 /* ============ TEXTE ============ */
-document.getElementById("btnEcrire").addEventListener("click", () => document.getElementById("zoneTexte").classList.toggle("actif"));
+function passerEnModeTexte() {
+  conversationActive = false;
+  if (enregistreur && enregistreur.state === "recording") { try { enregistreur.stop(); } catch(e) {} }
+  fermerMicro();
+  document.getElementById("zoneTexte").classList.add("actif");
+  document.getElementById("btnEcrire").style.display = "none";
+}
+document.getElementById("btnEcrire").addEventListener("click", () => { passerEnModeTexte(); document.getElementById("champTexte").focus(); });
+document.getElementById("champTexte").addEventListener("focus", passerEnModeTexte);
 document.getElementById("zoneTexte").addEventListener("submit", (e) => {
   e.preventDefault();
   const champ = document.getElementById("champTexte");
   if (!champ.value.trim()) return;
+  primerAudio();
   conversationActive = false; fermerMicro();
   const v = champ.value.trim(); champ.value = "";
   document.getElementById("transcription").textContent = "« " + v + " »";
