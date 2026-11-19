@@ -109,8 +109,9 @@
   #niveauRempli { height:100%; width:0%; background:#2ee66b; border-radius:3px; }
   #btnFini { display:none; margin:10px auto 0; padding:8px 20px; border-radius:999px; border:1px solid rgba(255,255,255,.55); background:rgba(0,0,0,.35); color:#fff; font-size:14px; }
   body.ecoute #btnFini { display:block; }
-  #chrono { display:none; position:fixed; left:8px; bottom:8px; z-index:60; font:11px/1.55 monospace; color:#b6ffb6; background:rgba(0,0,0,.55); padding:6px 9px; border-radius:8px; white-space:pre-line; pointer-events:none; text-align:left; }
+  #chrono { display:none; position:fixed; left:8px; bottom:8px; z-index:60; font:11px/1.55 monospace; color:#b6ffb6; background:rgba(0,0,0,.55); padding:6px 9px; border-radius:8px; white-space:pre-line; pointer-events:none; text-align:left; user-select:none; -webkit-user-select:none; }
   #chrono.actif { display:block; }
+  #btnParole, #btnParole * { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; touch-action:none; -webkit-tap-highlight-color:transparent; }
 
   /* ===== PETIT BOUTON BAS : rouge = Mayela parle, vert = à toi ===== */
   #zoneBouton { margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:7px; padding-bottom:6px; }
@@ -791,7 +792,8 @@ async function ecouterMicro(ptt) {
     reconstructions = 0;
     if (ptt) {
       if (blob.size > 1200) { await transcrire(blob); return; }
-      pretePourAppui();
+      setStatut("Trop court — maintiens un peu plus longtemps");
+      setTimeout(pretePourAppui, 1200);
       return;
     }
     if (!aParle && blob.size < 6000) { cycleSilencieux(); return; }
@@ -1366,20 +1368,30 @@ document.getElementById("btnFini").addEventListener("click", () => {
   if (enregistreur && enregistreur.state === "recording") { try { enregistreur.stop(); } catch(e) {} }
 });
 let dernierAppuiPTT = 0;
+let debutAppui = 0;
 const btnP = document.getElementById("btnParole");
 btnP.addEventListener("pointerdown", (e) => {
   if (!conversationActive || modeEcouteChoisi() !== "appuyer" || modeEcoute === "sr") return;
   if (document.body.className === "parle" || recoActif) return;
   e.preventDefault();
   appuiEnCours = true;
+  debutAppui = Date.now();
   ecouterMicro(true);
 });
 const finAppui = () => {
-  if (appuiEnCours && enregistreur && enregistreur.state === "recording") { dernierAppuiPTT = Date.now(); try { enregistreur.stop(); } catch(e) {} }
+  if (!appuiEnCours || !enregistreur || enregistreur.state !== "recording") return;
+  dernierAppuiPTT = Date.now();
+  const dureeMin = 400;
+  const reste = Math.max(0, dureeMin - (Date.now() - debutAppui));
+  setTimeout(() => {
+    try { enregistreur.requestData(); enregistreur.stop(); } catch(e) {}
+  }, reste);
 };
 btnP.addEventListener("pointerup", finAppui);
 btnP.addEventListener("pointercancel", finAppui);
 btnP.addEventListener("pointerleave", finAppui);
+btnP.addEventListener("contextmenu", e => e.preventDefault());
+btnP.addEventListener("selectstart", e => e.preventDefault());
 /* Démarrage automatique : Mayela parle dès l'arrivée sur la plateforme.
    Les navigateurs exigent un premier toucher avant le son : le tout premier
    toucher n'importe où sur l'écran lance donc la conversation. */
